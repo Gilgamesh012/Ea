@@ -70,8 +70,6 @@ public final class ClientFx {
     /** «Напряжение мира» 0..1: от заряда ближайшего заряжающего игрока. Управляет тьмой, туманом, тряской. */
     private static float tension, tensionPrev;
     private static float impactShake, flash;
-    /** «Вакуумная тишина» 0..1: давление падает, обычные звуки закладывает. */
-    private static float vacuum;
     private static long ticks;
 
     private ClientFx() {}
@@ -120,14 +118,13 @@ public final class ClientFx {
             abysses.clear();
             fadingFields.clear();
             strikes.clear();
-            tension = tensionPrev = impactShake = flash = vacuum = 0f;
+            tension = tensionPrev = impactShake = flash = 0f;
             return;
         }
         if (mc.isPaused()) return;
         ticks++;
 
         float target = 0f;
-        float vacuumTarget = 0f;
         Set<UUID> seen = new HashSet<>();
         for (AbstractClientPlayer p : level.players()) {
             if (!p.isUsingItem() || !(p.getUseItem().getItem() instanceof SwordOfRuptureItem)) continue;
@@ -136,15 +133,12 @@ public final class ClientFx {
             float charge = SwordOfRuptureItem.chargeFromTicks(p.getTicksUsingItem());
             float falloff = (float) Mth.clamp(1.0 - dist / 64.0, 0.0, 1.0);
             target = Math.max(target, charge * falloff);
-            vacuumTarget = Math.max(vacuumTarget, ChargeLayerSound.vacuumLevel(charge) * (float) Mth.clamp(1.0 - dist / 24.0, 0.0, 1.0));
 
             UUID id = p.getUUID();
             seen.add(id);
             CrackField field = casterFields.computeIfAbsent(id, u -> {
-                // Новый заряжающий: три слоя звука (скрежет → вой атмосферы → вакуумная тишина)
-                for (ChargeLayerSound.Layer layer : ChargeLayerSound.Layer.values()) {
-                    mc.getSoundManager().play(new ChargeLayerSound(p, layer));
-                }
+                // Новый заряжающий: запускаем закольцованный рёв вихря
+                mc.getSoundManager().play(new ChargeSoundInstance(p));
                 return CrackField.aroundCaster(p.position(), u.getLeastSignificantBits() ^ ticks);
             });
             field.charge = charge;
@@ -166,7 +160,6 @@ public final class ClientFx {
             }
         }
 
-        vacuum += (vacuumTarget - vacuum) * 0.25f;
         tensionPrev = tension;
         tension += (target - tension) * 0.12f;
         impactShake *= 0.9f;
@@ -286,16 +279,6 @@ public final class ClientFx {
             addChargeParticle(level, p, fp, new DustParticleOptions(CRIMSON, 2.0f), tip.x, tip.y - 0.3, tip.z,
                     rnd.nextGaussian() * 0.05, rnd.nextGaussian() * 0.05, rnd.nextGaussian() * 0.05);
         }
-    }
-
-    /** Во время «вакуумной тишины» все прочие звуки (шаги, голоса, ветер, музыка) закладывает. */
-    @SubscribeEvent
-    public static void onPlaySound(net.neoforged.neoforge.client.event.sound.PlaySoundEvent event) {
-        if (vacuum < 0.05f) return;
-        var sound = event.getSound();
-        if (sound == null || RuptureMod.MODID.equals(sound.getLocation().getNamespace())) return;
-        if (sound instanceof net.minecraft.client.resources.sounds.TickableSoundInstance) return; // их не обернуть без потери тика
-        event.setSound(new DuckedSound(sound, 1f - 0.88f * vacuum));
     }
 
     // ================================================================ камера, небо, туман
@@ -486,42 +469,6 @@ public final class ClientFx {
         public static void registerItemRenderer(RegisterClientExtensionsEvent event) {
             event.registerItem(new IClientItemExtensions() {
                 private EaSwordRenderer renderer;
-
-                @Override
-                public net.minecraft.client.model.HumanoidModel.ArmPose getArmPose(net.minecraft.world.entity.LivingEntity entity,
-                        net.minecraft.world.InteractionHand hand, net.minecraft.world.item.ItemStack stack) {
-                    // В третьем лице при зарядке клинок поднят, как копьё перед броском
-                    if (entity.isUsingItem() && entity.getUsedItemHand() == hand) {
-                        return net.minecraft.client.model.HumanoidModel.ArmPose.THROW_SPEAR;
-                    }
-                    return null;
-                }
-
-                /**
-                 * Своя поза от первого лица при зарядке: клинок плавно поднимается и уходит вправо-вперёд,
-                 * центр экрана свободен. Без рывков: только плавная интерполяция и медленное «дыхание» энергии.
-                 * В остальное время (обычный удар, ходьба) — ванильная анимация.
-                 */
-                @Override
-                public boolean applyForgeHandTransform(com.mojang.blaze3d.vertex.PoseStack ps, net.minecraft.client.player.LocalPlayer player,
-                        net.minecraft.world.entity.HumanoidArm arm, net.minecraft.world.item.ItemStack stack,
-                        float partialTick, float equipProcess, float swingProcess) {
-                    if (!player.isUsingItem() || player.getUseItem() != stack) return false;
-                    float used = player.getTicksUsingItem() + partialTick;
-                    float charge = SwordOfRuptureItem.chargeFromTicks(player.getTicksUsingItem());
-                    float k = Mth.clamp(used / 8f, 0f, 1f);
-                    k = k * k * (3f - 2f * k);                        // плавный подъём за ~0.4 с
-                    int side = arm == net.minecraft.world.entity.HumanoidArm.RIGHT ? 1 : -1;
-                    // базовая поза ванильного удержания
-                    ps.translate(side * 0.56f, -0.52f + equipProcess * -0.6f, -0.72f);
-                    // подъём: чуть выше, правее и дальше от камеры
-                    ps.translate(side * 0.12f * k, 0.10f * k, -0.10f * k);
-                    // наклон: остриё вперёд и наружу
-                    float breathe = Mth.sin(used * 0.12f) * 1.2f * charge;  // медленное, не дрожь
-                    ps.mulPose(com.mojang.math.Axis.XP.rotationDegrees(-18f * k + breathe));
-                    ps.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(side * -10f * k));
-                    return true;
-                }
 
                 @Override
                 public BlockEntityWithoutLevelRenderer getCustomRenderer() {

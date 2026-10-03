@@ -7,12 +7,9 @@
   "death.attack.rupture.item": "%1$s was torn out of space by %2$s using %3$s",
   "death.attack.rupture.player": "%1$s was torn out of space while fighting %2$s",
   "itemGroup.rupture": "Gate of Babylon",
-  "subtitles.rupture.enuma.spin_grind": "Cylinders grind",
-  "subtitles.rupture.enuma.atmos_howl": "Air howls",
-  "subtitles.rupture.enuma.vacuum": "Vacuum silence",
+  "subtitles.rupture.enuma.charge": "Crimson vortex roars",
   "subtitles.rupture.enuma.crack": "Space cracks",
   "subtitles.rupture.enuma.full_charge": "Ea fully charged",
   "subtitles.rupture.enuma.release": "Enuma Elish!",
-  "subtitles.rupture.enuma.impact": "The world is torn apart",
-  "subtitles.rupture.enuma.collapse": "Space collapses"
+  "subtitles.rupture.enuma.impact": "The world is torn apart"
 }

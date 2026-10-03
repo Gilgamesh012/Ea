@@ -97,8 +97,8 @@ def crackle(n, rate, lo=2500, hi=9000, grain=0.004, amp_jitter=True):
     return bp(out, lo, hi, 2)
 
 
-def save(name, x, keep_level=False):
-    x = x if keep_level else norm(x)
+def save(name, x):
+    x = norm(x)
     w = os.path.join(OUT, name + ".wav")
     wav.write(w, SR, (x * 32767).astype(np.int16))
     o = os.path.join(OUT, name + ".ogg")
@@ -137,188 +137,6 @@ def charge_loop():
     head = x[:X] * np.linspace(0, 1, X) + x[N:N + X] * np.linspace(1, 0, X)
     loop = np.concatenate([head, x[X:N]])
     return loop
-
-
-# ---------------------------------------------------------------- 1b. зарядка v2: «космическая» раскрутка Эа
-def loudness(x, drive=1.6, peak_db=-0.6):
-    """Плотнее и громче: мягкая компрессия (tanh), затем пик на -0.6 дБ."""
-    x = x / (np.max(np.abs(x)) + 1e-9)
-    x = np.tanh(x * drive) / np.tanh(drive)
-    return x / (np.max(np.abs(x)) + 1e-9) * 10 ** (peak_db / 20)
-
-
-def charge_loop_cosmic():
-    """
-    Артефакт, существовавший до сотворения мира:
-    - суббас 27.5 Гц (ощущается телом) с медленными биениями;
-    - турбинный вой трёх вращающихся цилиндров: гармоники 110 Гц с «флаттером» вращения
-      (в игре высота растёт с зарядом → раскрутка);
-    - неземной хор-гул: кластеры чистых тонов в квинтах/октавах с расстройкой, длинная реверберация;
-    - мерцание звёзд: редкие высокие колокольчики с долгим затуханием;
-    - тихий вихрь пространства на фоне.
-    """
-    L = 4.0
-    gen = 12.0                       # генерируем длиннее и берём середину — хвосты реверба тоже «закольцуются»
-    n = int(gen * SR)
-    t = np.arange(n) / SR
-    # суббас
-    sub = (np.sin(2 * np.pi * 27.5 * t) + 0.6 * np.sin(2 * np.pi * 55.25 * t) + 0.3 * np.sin(2 * np.pi * 82.5 * t))
-    sub = sat(sub * 0.7, 2.0) * (0.85 + 0.15 * np.sin(2 * np.pi * 0.25 * t))
-    # турбина: гармоники 110 Гц, флаттер 3 цилиндров (разные частоты: 6, 7.5, 9 Гц → верх/низ в одну сторону, середина в другую)
-    turb = np.zeros(n)
-    for h, a in [(1, 1.0), (2, 0.7), (3, 0.5), (4, 0.35), (6, 0.25), (8, 0.15), (12, 0.08)]:
-        turb += np.sin(2 * np.pi * 110 * h * t + h * 0.7) * a
-    flutter = (0.55 + 0.15 * np.sin(2 * np.pi * 6.0 * t) + 0.15 * np.sin(2 * np.pi * 7.5 * t + 1.0)
-               + 0.15 * np.sin(2 * np.pi * 9.0 * t + 2.0))
-    turb = lp(turb * flutter, 4000, 2)
-    # хор-гул «космоса»: A-минорный кластер с расстройкой (биения 0.25–0.5 Гц)
-    pad = np.zeros(n)
-    for f, a in [(110, .8), (110.25, .8), (164.8, .55), (165.3, .5), (220, .6), (220.5, .5), (329.6, .35), (330.2, .3),
-                 (440, .25), (659.3, .15), (880.6, .1)]:
-        vib = 1 + 0.002 * np.sin(2 * np.pi * 0.5 * t + f)
-        pad += np.sin(2 * np.pi * np.cumsum(f * vib) / SR) * a
-    pad *= 0.7 + 0.3 * np.sin(2 * np.pi * 0.25 * t)
-    # звёзды
-    stars = np.zeros(n)
-    for _ in range(int(gen * 3)):
-        s0 = rng.integers(0, n - SR)
-        f = rng.choice([1760, 1975.5, 2637, 2960, 3520, 3951, 5274])
-        L2 = int(rng.uniform(0.6, 1.5) * SR)
-        stars[s0:s0 + L2] += np.sin(2 * np.pi * f * np.arange(L2) / SR) * exp_decay(L2, rng.uniform(0.2, 0.6)) * rng.uniform(.2, .6)
-    # вихрь пространства
-    wind = np.zeros(n)
-    for i, (lo, hi) in enumerate([(200, 500), (500, 1200), (1200, 3000)]):
-        wind += bp(noise(n), lo, hi, 2) * (0.5 + 0.5 * np.sin(2 * np.pi * (0.5 + 0.25 * i) * t + i)) ** 2
-    dry = sub * 1.0 + turb * 0.45 + pad * 0.35 + stars * 0.25 + wind * 0.25
-    wet = reverb(dry, 3.5, 0.45, bright=6000)[:n]
-    # середина + бесшовная склейка
-    N = int(L * SR); X = int(0.5 * SR); s0 = int(4.0 * SR)
-    seg = wet[s0:s0 + N + X]
-    loop = np.concatenate([seg[:X] * np.linspace(0, 1, X) + seg[N:N + X] * np.linspace(1, 0, X), seg[X:N]])
-    return loudness(loop, 1.8)
-
-
-# ================================================================ ФАЗЫ по описанию Насу (v3)
-def make_loop(gen_fn, L=4.0, gen=10.0, xf=0.5, rev=None):
-    """Генерирует длиннее, берёт середину и склеивает с кроссфейдом — бесшовная петля."""
-    n = int(gen * SR)
-    x = gen_fn(n, np.arange(n) / SR)
-    if rev:
-        x = reverb(x, *rev)[:n]
-    N, X, s0 = int(L * SR), int(xf * SR), int(3.0 * SR)
-    seg = x[s0:s0 + N + X]
-    return np.concatenate([seg[:X] * np.linspace(0, 1, X) + seg[N:N + X] * np.linspace(1, 0, X), seg[X:N]])
-
-
-def resonators(x, freqs, q=40.0):
-    """Набор узких резонаторов (модальный синтез): металлический/каменный отклик."""
-    out = np.zeros_like(x)
-    for f, a in freqs:
-        b, a2 = sg.iirpeak(f, q, fs=SR)
-        out += sg.lfilter(b, a2, x) * a
-    return out
-
-
-# --- Фаза 1: сухой тектонический скрежет (раскрутка)
-def spin_grind():
-    def g(n, t):
-        # трение камня о камень: плотные грубые зёрна шума, «сухо», без реверба
-        grains = np.zeros(n)
-        G = int(0.012 * SR)
-        for _ in range(int(n / SR * 900)):
-            p0 = rng.integers(0, n - G)
-            L = rng.integers(G // 3, G)
-            grains[p0:p0 + L] += noise(L) * np.hanning(L) * rng.uniform(0.2, 1.0)
-        grains = bp(grains, 40, 900, 2)
-        # три цилиндра трутся с разной скоростью: верх/низ одна фаза, середина другая
-        rot = 0.55 + 0.25 * np.abs(np.sin(2 * np.pi * 1.5 * t)) + 0.25 * np.abs(np.sin(2 * np.pi * 2.25 * t + 1.0))
-        grind = grains * rot
-        # миллионотонный металл/камень: низкие негармоничные моды
-        metal = resonators(grind, [(47, .9), (73, .8), (97, .6), (141, .5), (188, .4), (262, .3), (377, .2)], q=35)
-        # давление «на дне океана»: инфра/суббас с медленным набуханием
-        sub = sat(np.sin(2 * np.pi * 24 * t) + 0.5 * np.sin(2 * np.pi * 36.5 * t), 1.8) * (0.8 + 0.2 * np.sin(2 * np.pi * 0.25 * t))
-        crunch = hp(grains, 900, 2) * 0.25
-        return grind * 0.9 + metal * 2.2 + sub * 0.9 + crunch
-    return loudness(make_loop(g), 1.7)
-
-
-# --- Фаза 2: вопль атмосферы (воздух рассекается микро-разрывами)
-def atmos_howl():
-    def g(n, t):
-        howl = np.zeros(n)
-        # несколько пронзительных воющих полос; частоты гуляют периодично (кратно 0.25 Гц → петля)
-        for i, (f0, dev, rate, a) in enumerate([(1400, 250, 0.25, 1.0), (2300, 400, 0.5, .7), (3600, 500, 0.75, .5), (900, 150, 0.5, .6)]):
-            fc = f0 + dev * np.sin(2 * np.pi * rate * t + i)
-            ph = np.cumsum(fc) / SR
-            carrier = np.sin(2 * np.pi * ph)
-            band = bp(noise(n), 30, 300, 2)            # «рваная» огибающая — воздух, а не чистый тон
-            howl += carrier * (0.4 + np.abs(band) * 3) * a
-        roar = bp(noise(n), 300, 6000, 2) * (0.5 + 0.5 * np.sin(2 * np.pi * 0.5 * t) ** 2)
-        micro = crackle(n, 60, 3000, 11000, grain=0.0015) * 1.4   # микро-разрывы пространства
-        return howl * 0.5 + roar * 0.35 + micro * 0.6
-    return loudness(make_loop(g, rev=(1.5, 0.25, 7000)), 1.6)
-
-
-# --- Фаза 2б: «вакуумная тишина» — почти ничего, только давление и ультразвуковой писк Текстуры Мира
-def vacuum_squeal():
-    def g(n, t):
-        squeal = (np.sin(2 * np.pi * 9800 * t) * 0.5 + np.sin(2 * np.pi * 9812 * t) * 0.5 +
-                  np.sin(2 * np.pi * 12400 * t) * 0.25) * (0.6 + 0.4 * np.sin(2 * np.pi * 0.5 * t))
-        pressure = np.sin(2 * np.pi * 19 * t) * (0.8 + 0.2 * np.sin(2 * np.pi * 0.25 * t))   # давление на перепонки
-        hush = lp(noise(n), 120, 2) * 0.5
-        pops = crackle(n, 6, 6000, 14000, grain=0.001) * 0.8          # лопается Текстура Мира
-        return squeal * 0.12 + pressure * 0.9 + hush + pops
-    return loudness(make_loop(g), 1.3)
-
-
-# --- Фаза 3: треск рвущегося холста → первобытный рёв хаоса
-def release_v3():
-    dur = 6.5
-    n = int(dur * SR)
-    t = t_axis(dur)
-    # 0–0.45 с: «рвущееся сукно / толстое стекло» — зёрна треска всё гуще и громче
-    tear = np.zeros(n)
-    T = int(0.45 * SR)
-    for k in range(1400):
-        u = rng.random() ** 0.6
-        p0 = int(u * T)
-        L = rng.integers(20, 220)
-        if p0 + L >= n: continue
-        tear[p0:p0 + L] += noise(L) * np.hanning(L) * (0.3 + 0.7 * u)
-    tear = bp(tear, 700, 9000, 2) * 1.6
-    glass = sum(np.sin(2 * np.pi * f * t + rng.uniform(0, 6)) * exp_decay(n, rng.uniform(0.15, 0.5)) * a
-                for f, a in [(1830, .4), (2470, .35), (3390, .3), (4610, .25), (6120, .2)])
-    glass *= (t > 0.42) * 0.5
-    rip = noise(n) * exp_decay(n, 0.05) * (t > 0.42)                  # момент разрыва
-    # 0.4–6 с: первобытный рёв
-    env = np.clip((t - 0.4) / 0.15, 0, 1) * exp_decay(n, 2.2)
-    quake = lp(noise(n), 70, 4) * 6 + sat(sweep_sine(dur, 55, 18, 2) * 1.2, 2)       # подземный толчок
-    avalanche = bp(noise(n), 80, 900, 2) * (0.6 + 0.4 * np.abs(np.sin(2 * np.pi * 1.3 * t)))   # грохот лавины
-    # рёв сжатого вакуума: резонансная полоса, сползающая 2 кГц → 150 Гц
-    vac = np.zeros(n)
-    seg = 24
-    for k in range(seg):
-        a0, a1 = int(k * n / seg), int((k + 1) * n / seg)
-        f = 2000 * (150 / 2000) ** (k / (seg - 1))
-        vac[a0:a1] = bp(noise(n), f * 0.8, f * 1.25, 2)[a0:a1]
-    void = sum(np.sin(2 * np.pi * np.cumsum(np.linspace(f0, f0 * 0.22, n)) / SR) for f0 in (290, 297, 435)) * 0.25  # вой пустоты
-    roar = (quake * 0.9 + avalanche * 0.7 + vac * 0.9 + void) * env
-    x = tear + glass + rip * 0.8 + roar
-    return loudness(fade(reverb(x, 4.0, 0.35, bright=5000)[: int(7.5 * SR)], 0.001, 1.2), 1.5)
-
-
-# --- Фаза 4: эхо схлопывания — «мёртвый» вакуумный хлопок, затем мир с треском затягивается
-def collapse():
-    dur = 3.5
-    n = int(dur * SR)
-    t = t_axis(dur)
-    thump = np.sin(2 * np.pi * np.cumsum(np.linspace(85, 35, n)) / SR) * exp_decay(n, 0.09)     # глухой, без реверба
-    pop = lp(noise(n), 400, 4) * exp_decay(n, 0.03)
-    suck = bp(noise(n), 200, 2500, 2) * np.clip(1 - t / 0.25, 0, 1) ** 2 * (t < 0.25) * 0.4      # втягивание перед хлопком
-    knit = crackle(n, 90, 900, 6000, grain=0.004) * np.clip((t - 0.15) / 0.2, 0, 1) * exp_decay(n, 0.9)   # Текстура затягивается
-    hum = np.sin(2 * np.pi * np.cumsum(np.linspace(120, 60, n)) / SR) * np.clip((t - 0.1) / 0.3, 0, 1) * exp_decay(n, 1.0) * 0.35
-    x = np.roll(suck, 0) + thump * 1.2 + pop * 0.8 + knit * 0.9 + hum
-    return loudness(fade(x, 0.001, 0.6), 1.4)
 
 
 # ---------------------------------------------------------------- 2. треск пространства (3 варианта)
@@ -401,44 +219,37 @@ def impact():
 
 if __name__ == "__main__":
     out = {}
-    out["spin_grind"] = save("spin_grind", spin_grind(), keep_level=True)
-    out["atmos_howl"] = save("atmos_howl", atmos_howl(), keep_level=True)
-    out["vacuum_squeal"] = save("vacuum_squeal", vacuum_squeal(), keep_level=True)
+    out["charge_loop"] = save("charge_loop", charge_loop())
     for i, seed in enumerate((11, 22, 33), 1):
         out[f"crack{i}"] = save(f"crack{i}", crack(seed))
     rng = np.random.default_rng(99)
     out["full_charge"] = save("full_charge", full_charge())
-    out["release"] = save("release", release_v3(), keep_level=True)
+    out["release"] = save("release", release())
     out["impact"] = save("impact", impact())
-    out["collapse"] = save("collapse", collapse(), keep_level=True)
 
-    # Демо: 10 с зарядки (скрежет → вой → вакуум) → выстрел → удар → схлопывание
+    # Демо: как это прозвучит в игре (15 с зарядки → выстрел → удар)
     def at(buf, x, sec, gain=1.0):
-        s0 = int(sec * SR); e = min(len(buf), s0 + len(x)); buf[s0:e] += x[: e - s0] * gain
+        s = int(sec * SR)
+        e = min(len(buf), s + len(x))
+        buf[s:e] += x[: e - s] * gain
 
-    def smooth(c, a, b):
-        k = np.clip((c - a) / (b - a), 0, 1); return k * k * (3 - 2 * k)
-
-    def layer(loop, c, pitch):
-        pos = np.cumsum(pitch)
-        src = np.tile(loop, int(pos[-1] / len(loop)) + 2)
-        return np.interp(pos, np.arange(len(src)), src)
-
-    CH = 10.0
-    m = int(CH * SR)
-    c = np.arange(m) / m
-    grind_v = (0.6 + 0.4 * c) * (1 - smooth(c, 0.6, 0.85))
-    howl_v = smooth(c, 0.25, 0.55) * (1 - smooth(c, 0.82, 0.9))
-    vac_v = smooth(c, 0.82, 0.92)
-    demo = np.zeros(int(19 * SR))
-    at(demo, layer(out["spin_grind"], c, 0.5 + 0.6 * np.minimum(c, 0.6) / 0.6) * grind_v, 0, 0.9)
-    at(demo, layer(out["atmos_howl"], c, 0.7 + 0.9 * c) * howl_v, 0, 0.7)
-    at(demo, layer(out["vacuum_squeal"], c, np.ones(m)) * vac_v, 0, 0.9)
+    demo = np.zeros(int(26 * SR))
+    loop = out["charge_loop"]
+    charge_len = 15.0
+    reps = int(np.ceil(charge_len * SR / len(loop))) + 1
+    long_loop = np.tile(loop, reps)[: int(charge_len * SR)]
+    # громкость и высота плавно растут с зарядом (как в игре: pitch 0.6 → 1.3)
+    out_len = int(charge_len * SR)
+    c = np.arange(out_len) / out_len
+    rate = 0.6 + 0.7 * c
+    pos = np.cumsum(rate)
+    src = np.tile(loop, int(pos[-1] / len(loop)) + 2)
+    pl = np.interp(pos, np.arange(len(src)), src) * (0.25 + 0.75 * c)
+    at(demo, pl, 0.0, 0.8)
     for k in range(1, 10):
-        at(demo, out[f"crack{(k % 3) + 1}"], k * 1.0, 0.25 + 0.04 * k)
-    at(demo, out["full_charge"], 10.0, 0.6)
-    at(demo, out["release"], 11.5, 1.0)
-    at(demo, out["impact"], 12.0, 0.8)
-    at(demo, out["collapse"], 14.5, 0.9)
-    save("demo_enuma_elish_v3", demo)
+        at(demo, out[f"crack{(k % 3) + 1}"], k * 1.5, 0.35 + 0.05 * k)
+    at(demo, out["full_charge"], 15.0, 0.9)
+    at(demo, out["release"], 18.0, 1.0)
+    at(demo, out["impact"], 18.6, 1.0)
+    save("demo_enuma_elish", demo)
     print("ok")

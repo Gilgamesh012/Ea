@@ -3,8 +3,6 @@ package com.rupture.client;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.rupture.ClientConfig;
 import com.rupture.RuptureMath;
-import com.rupture.registry.ModSounds;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.particles.DustColorTransitionOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -110,12 +108,6 @@ final class StrikeFx {
                 level.addParticle(new DustColorTransitionOptions(rnd.nextBoolean() ? SCARLET : CRIMSON, BLOOD, 1.5f + charge * 2f),
                         end.x, end.y, end.z, vel.x, vel.y, vel.z);
             }
-        }
-
-        // Фаза 4: эхо схлопывания — Текстура Земли затягивает рану
-        if (age == TRAVEL + 18) {
-            level.playLocalSound(end.x, end.y, end.z, ModSounds.COLLAPSE.get(), SoundSource.PLAYERS,
-                    0.5f + 0.5f * charge, 1.15f - 0.3f * charge, false);
         }
 
         // После удара: вихрь схлопывается в точку
