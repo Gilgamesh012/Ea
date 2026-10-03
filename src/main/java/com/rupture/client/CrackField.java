@@ -37,12 +37,12 @@ final class CrackField {
             Vec3 dir = new Vec3(rnd.nextGaussian(), Math.abs(rnd.nextGaussian()) * 0.8 + 0.1, rnd.nextGaussian()).normalize();
             double r = 1.8 + rnd.nextDouble() * 4.5;
             Vec3 start = anchor.add(0, 0.9, 0).add(dir.scale(r));
-            f.addCrack(rnd, start, rnd.nextFloat(), 0.035f, false, 4 + rnd.nextInt(6), 0.25, 0.6);
+            f.addCrack(rnd, start, rnd.nextFloat(), 0.011f, false, 4 + rnd.nextInt(6), 0.25, 0.6);
         }
         // Алая решётка в небе (как разлом над головой) — появляется во второй половине заряда
         for (int i = 0; i < 18; i++) {
             Vec3 start = anchor.add((rnd.nextDouble() - 0.5) * 30, 10 + rnd.nextDouble() * 18, (rnd.nextDouble() - 0.5) * 30);
-            f.addCrack(rnd, start, 0.45f + rnd.nextFloat() * 0.55f, 0.12f, true, 3 + rnd.nextInt(4), 2.0, 4.5);
+            f.addCrack(rnd, start, 0.45f + rnd.nextFloat() * 0.55f, 0.04f, true, 3 + rnd.nextInt(4), 2.0, 4.5);
         }
         return f;
     }
@@ -55,7 +55,7 @@ final class CrackField {
         for (int i = 0; i < count; i++) {
             Vec3 dir = new Vec3(rnd.nextGaussian(), rnd.nextGaussian() * 0.7, rnd.nextGaussian()).normalize();
             Vec3 start = anchor.add(dir.scale(radius * (0.6 + rnd.nextDouble() * 0.7)));
-            f.addCrack(rnd, start, 0f, 0.05f + charge * 0.04f, false, 5 + rnd.nextInt(6), 0.3, 0.9);
+            f.addCrack(rnd, start, 0f, 0.016f + charge * 0.014f, false, 5 + rnd.nextInt(6), 0.3, 0.9);
         }
         f.charge = 1f;
         f.life = ticks;
@@ -124,7 +124,7 @@ final class CrackField {
                 Vec3 b = pts.get(s + 1);
                 float part = Math.min(1f, segsVisible - s);
                 if (part < 1f) b = a.add(b.subtract(a).scale(part));
-                float glowW = c.width * (c.sky ? 3.5f : 4f);
+                float glowW = c.width * (c.sky ? 3.0f : 3.2f);
                 // Широкое алое свечение + яркая сердцевина
                 quad(vc, pose, cam, a, b, glowW, 0.85f, 0.03f, 0.05f, 0.30f * vis * flicker);
                 quad(vc, pose, cam, a, b, c.width, 1.0f, 0.15f, 0.1f, 0.95f * vis * flicker);

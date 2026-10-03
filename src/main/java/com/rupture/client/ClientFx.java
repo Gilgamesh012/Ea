@@ -61,6 +61,8 @@ public final class ClientFx {
     private static final Map<UUID, CrackField> casterFields = new HashMap<>();
     private static final List<CrackField> fadingFields = new ArrayList<>();
     private static final List<StrikeFx> strikes = new ArrayList<>();
+    /** Горизонтальный вихрь вокруг заряжающего: {угол, угол прошлого тика, заряд}. */
+    private static final Map<UUID, float[]> casterSpin = new HashMap<>();
 
     /** «Напряжение мира» 0..1: от заряда ближайшего заряжающего игрока. Управляет тьмой, туманом, тряской. */
     private static float tension, tensionPrev;
@@ -103,6 +105,7 @@ public final class ClientFx {
         Player me = mc.player;
         if (level == null || me == null) {
             casterFields.clear();
+            casterSpin.clear();
             fadingFields.clear();
             strikes.clear();
             tension = tensionPrev = impactShake = flash = 0f;
@@ -123,15 +126,23 @@ public final class ClientFx {
 
             UUID id = p.getUUID();
             seen.add(id);
-            CrackField field = casterFields.computeIfAbsent(id,
-                    u -> CrackField.aroundCaster(p.position(), u.getLeastSignificantBits() ^ ticks));
+            CrackField field = casterFields.computeIfAbsent(id, u -> {
+                // Новый заряжающий: запускаем закольцованный рёв вихря
+                mc.getSoundManager().play(new ChargeSoundInstance(p));
+                return CrackField.aroundCaster(p.position(), u.getLeastSignificantBits() ^ ticks);
+            });
             field.charge = charge;
+            float[] spin = casterSpin.computeIfAbsent(id, u -> new float[3]);
+            spin[1] = spin[0];
+            spin[0] += 0.07f + 0.5f * charge;   // скорость вращения растёт с зарядом
+            spin[2] = charge;
             spawnChargeParticles(level, p, charge);
         }
         // Игрок перестал заряжать — его трещины гаснут
         for (Iterator<Map.Entry<UUID, CrackField>> it = casterFields.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<UUID, CrackField> e = it.next();
             if (!seen.contains(e.getKey())) {
+                casterSpin.remove(e.getKey());
                 e.getValue().release();
                 fadingFields.add(e.getValue());
                 it.remove();
@@ -153,20 +164,23 @@ public final class ClientFx {
         double density = ClientConfig.particles();
         double cx = p.getX(), cy = p.getY(), cz = p.getZ();
 
-        // 1. Спиральный вихрь: 3 рукава, поднимаются и закручиваются; растут с зарядом
-        int arms = 3;
-        int perArm = (int) ((2 + charge * 7) * density);
-        double height = 1.2 + charge * 4.5;
-        double baseR = 1.3 + charge * 2.2;
+        // 1. Горизонтальный алый вихрь вокруг персонажа: радиус, высота, плотность и скорость растут с зарядом
+        float[] spin = casterSpin.get(p.getUUID());
+        double base = spin != null ? spin[0] : ticks * 0.1;
+        int arms = 2 + (int) (charge * 4);
+        int perArm = (int) ((2 + charge * 6) * density);
+        double height = 0.4 + charge * 2.4;
+        double baseR = 1.4 + charge * 3.2;
+        double tangential = 0.12 + charge * 0.45;
         for (int k = 0; k < arms; k++) {
             for (int i = 0; i < perArm; i++) {
-                double h = rnd.nextDouble() * height;
-                double a = ticks * (0.15 + charge * 0.35) + k * (Math.PI * 2 / arms) + h * 1.1;
-                double r = baseR * (0.55 + 0.45 * (h / height));
+                double h = 0.1 + rnd.nextDouble() * height;
+                double a = base + k * (Math.PI * 2 / arms) - rnd.nextDouble() * 0.9; // хвост за рукавом
+                double r = baseR * (0.8 + 0.3 * rnd.nextDouble());
                 double x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
-                double vx = -Math.sin(a) * 0.12 * (0.5 + charge), vz = Math.cos(a) * 0.12 * (0.5 + charge);
+                double vx = -Math.sin(a) * tangential, vz = Math.cos(a) * tangential;
                 level.addParticle(new DustColorTransitionOptions(rnd.nextFloat() < 0.75f ? SCARLET : CRIMSON, BLOOD, 0.9f + charge * 1.6f),
-                        x, cy + h, z, vx, 0.03 + charge * 0.05, vz);
+                        x, cy + h, z, vx, 0.0, vz);
             }
         }
 
@@ -253,7 +267,7 @@ public final class ClientFx {
     public static void onRenderLevel(RenderLevelStageEvent event) {
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
         boolean cracks = ClientConfig.cracks();
-        if (strikes.isEmpty() && (!cracks || (casterFields.isEmpty() && fadingFields.isEmpty()))) return;
+        if (strikes.isEmpty() && casterSpin.isEmpty() && (!cracks || fadingFields.isEmpty())) return;
 
         Minecraft mc = Minecraft.getInstance();
         Vec3 cam = event.getCamera().getPosition();
@@ -268,7 +282,49 @@ public final class ClientFx {
             for (CrackField f : fadingFields) f.render(vc, pose, cam, time);
         }
         for (StrikeFx s : strikes) s.render(vc, pose, cam, partial);
+        if (mc.level != null && !casterSpin.isEmpty()) {
+            for (AbstractClientPlayer p : mc.level.players()) {
+                float[] spin = casterSpin.get(p.getUUID());
+                if (spin != null) renderCasterVortex(vc, pose, cam, p.getPosition(partial), Mth.lerp(partial, spin[1], spin[0]), spin[2], time);
+            }
+        }
         buffers.endBatch(RenderType.lightning());
+    }
+
+    /**
+     * Алые ленты ветра, кружащие вокруг персонажа по горизонтали.
+     * С ростом заряда появляется больше колец, они шире, выше, длиннее и быстрее.
+     */
+    private static void renderCasterVortex(VertexConsumer vc, Matrix4f pose, Vec3 cam, Vec3 pos, float angle, float charge, float time) {
+        int bands = 1 + (int) Math.ceil(charge * 5);
+        double radius = 1.4 + charge * 3.2;
+        double arcLen = 0.9 + charge * 2.0;               // длина ленты, радианы
+        for (int j = 0; j < bands; j++) {
+            float appear = Mth.clamp(charge * 6f - j, 0f, 1f); // кольца появляются по очереди
+            if (appear <= 0.01f) continue;
+            double y = pos.y + 0.15 + j * (0.3 + 0.25 * charge);
+            double r = radius * (1.0 + 0.1 * Math.sin(j * 1.7)) + j * 0.15;
+            double bandAngle = angle * (1.0 + j * 0.08) + j * 1.3;
+            for (int arm = 0; arm < 2; arm++) {
+                double a0 = bandAngle + arm * Math.PI;
+                int seg = 18;
+                Vec3 prev = null;
+                for (int i = 0; i <= seg; i++) {
+                    double f = i / (double) seg;           // 0 = хвост, 1 = голова
+                    double a = a0 - arcLen * (1 - f);
+                    double wobble = 0.08 * Math.sin(a * 2 + time * 0.2 + j);
+                    Vec3 pt = new Vec3(pos.x + Math.cos(a) * r, y + wobble, pos.z + Math.sin(a) * r);
+                    if (prev != null) {
+                        float taper = (float) Math.sin(Math.PI * f);   // тонкие концы
+                        float alpha = (0.25f + 0.6f * charge) * appear * taper;
+                        float w = (0.05f + 0.16f * charge) * (0.4f + 0.6f * taper);
+                        CrackField.quad(vc, pose, cam, prev, pt, w * 2.6f, 0.8f, 0.0f, 0.02f, alpha * 0.35f);
+                        CrackField.quad(vc, pose, cam, prev, pt, w, 1.0f, 0.08f, 0.05f, alpha);
+                    }
+                    prev = pt;
+                }
+            }
+        }
     }
 
     // ================================================================ 2D: алая пелена и вспышка

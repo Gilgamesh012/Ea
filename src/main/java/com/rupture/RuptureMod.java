@@ -3,6 +3,7 @@ package com.rupture;
 import com.mojang.logging.LogUtils;
 import com.rupture.network.StrikeFxPayload;
 import com.rupture.registry.ModItems;
+import com.rupture.registry.ModSounds;
 import com.rupture.restore.RestoreManager;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTabs;
@@ -26,6 +27,7 @@ public class RuptureMod {
 
     public RuptureMod(IEventBus modBus, ModContainer container) {
         ModItems.ITEMS.register(modBus);
+        ModSounds.SOUNDS.register(modBus);
         modBus.addListener(this::addToCreativeTabs);
 
         // SERVER-конфиг: хранится в мире (serverconfig/) и синхронизируется клиентам при входе.

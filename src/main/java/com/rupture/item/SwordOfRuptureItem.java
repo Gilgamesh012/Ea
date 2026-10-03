@@ -1,6 +1,7 @@
 package com.rupture.item;
 
 import com.rupture.RuptureConfig;
+import com.rupture.registry.ModSounds;
 import com.rupture.strike.RuptureStrike;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
@@ -106,30 +107,15 @@ public class SwordOfRuptureItem extends SwordItem {
                     .withStyle(charge >= 1f ? ChatFormatting.DARK_RED : ChatFormatting.RED), true);
         }
 
-        if (charge < 1f) {
-            // Нарастающий гул: чем выше заряд, тем чаще и ниже
-            int period = Math.max(8, 40 - (int) (charge * 30));
-            if (used % period == 0) {
-                level.playSound(null, x, y, z, SoundEvents.BEACON_AMBIENT, SoundSource.PLAYERS, 0.8f + charge * 1.5f, 1.2f - charge * 0.7f);
-            }
-            if (used % 30 == 15) {
-                level.playSound(null, x, y, z, SoundEvents.PORTAL_AMBIENT, SoundSource.PLAYERS, 0.3f + charge, 0.5f + charge * 0.5f);
-            }
-            // Каждые 10% мир трескается со звуком
-            int step = Math.max(1, full / 10);
-            if (used > 0 && used % step == 0) {
-                level.playSound(null, x, y, z, SoundEvents.GLASS_BREAK, SoundSource.PLAYERS, 0.6f + charge * 1.4f, 0.5f + (1f - charge) * 0.3f);
-                level.playSound(null, x, y, z, SoundEvents.DEEPSLATE_BREAK, SoundSource.PLAYERS, 0.8f + charge, 0.5f);
-            }
-        } else {
-            // Полный заряд: низкое сердцебиение пространства
-            if (used % 20 == 0) {
-                level.playSound(null, x, y, z, SoundEvents.WARDEN_HEARTBEAT, SoundSource.PLAYERS, 2.5f, 0.6f);
-            }
+        // Рёв вихря (закольцованный) играет на клиенте и следует за игроком — см. ChargeSoundInstance.
+        // Каждые 10% пространство трескается
+        int step = Math.max(1, full / 10);
+        if (charge < 1f && used > 0 && used % step == 0) {
+            level.playSound(null, x, y, z, ModSounds.CRACK.get(), SoundSource.PLAYERS, 0.6f + charge * 1.6f, 1.1f - charge * 0.35f);
         }
+        // Полный заряд: суббас-удар и белая вспышка
         if (used == full) {
-            level.playSound(null, x, y, z, SoundEvents.WARDEN_SONIC_CHARGE, SoundSource.PLAYERS, 3.0f, 0.6f);
-            level.playSound(null, x, y, z, SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 2.0f, 0.5f);
+            level.playSound(null, x, y, z, ModSounds.FULL_CHARGE.get(), SoundSource.PLAYERS, 3.0f, 1.0f);
         }
     }
 

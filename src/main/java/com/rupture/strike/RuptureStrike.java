@@ -2,6 +2,7 @@ package com.rupture.strike;
 
 import com.rupture.RuptureConfig;
 import com.rupture.network.StrikeFxPayload;
+import com.rupture.registry.ModSounds;
 import com.rupture.registry.ModTags;
 import com.rupture.restore.RestoreJob;
 import com.rupture.restore.RuptureSavedData;
@@ -9,7 +10,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageType;
@@ -129,17 +129,10 @@ public final class RuptureStrike {
     }
 
     private static void playStrikeSounds(ServerLevel level, Vec3 from, Vec3 at, float charge) {
-        float vol = 1.5f + charge * 4f;
-        level.playSound(null, from.x, from.y, from.z, SoundEvents.WARDEN_SONIC_BOOM, SoundSource.PLAYERS, vol, 1.3f - charge * 0.7f);
-        level.playSound(null, from.x, from.y, from.z, SoundEvents.BEACON_DEACTIVATE, SoundSource.PLAYERS, vol, 0.5f);
-        level.playSound(null, at.x, at.y, at.z, SoundEvents.END_PORTAL_SPAWN, SoundSource.PLAYERS, vol, 1.6f - charge);
-        level.playSound(null, at.x, at.y, at.z, SoundEvents.GLASS_BREAK, SoundSource.PLAYERS, vol, 0.5f);
-        if (charge >= 0.4f) {
-            level.playSound(null, at.x, at.y, at.z, SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, vol * 2f, 0.6f);
-            level.playSound(null, at.x, at.y, at.z, SoundEvents.WITHER_BREAK_BLOCK, SoundSource.PLAYERS, vol, 0.5f);
-        }
-        if (charge >= 0.8f) {
-            level.playSound(null, at.x, at.y, at.z, SoundEvents.ENDER_DRAGON_GROWL, SoundSource.PLAYERS, vol * 2f, 0.5f);
-        }
+        // На слабом заряде звук тише и выше, на полном — громче и ниже
+        float vol = 0.5f + charge * 2.5f;
+        float pitch = 1.25f - charge * 0.3f;
+        level.playSound(null, from.x, from.y, from.z, ModSounds.RELEASE.get(), SoundSource.PLAYERS, vol, pitch);
+        level.playSound(null, at.x, at.y, at.z, ModSounds.IMPACT.get(), SoundSource.PLAYERS, vol, pitch);
     }
 }

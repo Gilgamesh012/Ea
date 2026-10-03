@@ -54,11 +54,11 @@ public final class RuptureConfig {
 
         B.push("beam");
         BEAM_RANGE = B.comment("Дальность «Энума Элиш», блоков")
-                .defineInRange("beamRangeBlocks", 256.0, 4.0, 1024.0);
+                .defineInRange("enumaRangeBlocks", 370.0, 4.0, 1024.0);
         CONE_HALF_ANGLE = B.comment("Половина угла конуса луча, градусы")
                 .defineInRange("coneHalfAngle", 10.0, 0.0, 60.0);
         IMPACT_RADIUS_MAX = B.comment("Радиус урона в точке удара на 100% заряда (растёт пропорционально заряду)")
-                .defineInRange("impactRadiusMax", 8.0, 0.0, 64.0);
+                .defineInRange("impactRadiusMaxV2", 20.0, 0.0, 128.0);
         B.pop();
 
         B.push("blocks");
@@ -67,16 +67,16 @@ public final class RuptureConfig {
         BLOCK_MIN_CHARGE = B.comment("Ниже этого заряда мир только «моргает», блоки целы")
                 .defineInRange("blockMinChargeV2", 0.1, 0.0, 1.0);
         BLOCK_RADIUS_MAX = B.comment("Радиус разрыва блоков на 100% заряда (растёт пропорционально заряду)")
-                .defineInRange("blockRadiusMax", 10.0, 0.0, 32.0);
+                .defineInRange("craterRadiusMax", 25.0, 0.0, 64.0);
         MAX_BLOCKS_PER_STRIKE = B.comment("Предохранитель: максимум блоков за один удар")
-                .defineInRange("maxBlocksPerStrike", 8000, 0, 200000);
+                .defineInRange("maxBlocksPerStrikeV2", 70000, 0, 1000000);
         B.pop();
 
         B.push("restore");
         RESTORE_DELAY_SECONDS = B.comment("Через сколько секунд мир начинает собираться обратно")
                 .defineInRange("restoreDelaySeconds", 5, 0, 3600);
         RESTORE_BLOCKS_PER_TICK = B.comment("Сколько блоков восстанавливать за тик (меньше = плавнее для сервера)")
-                .defineInRange("restoreBlocksPerTick", 200, 1, 10000);
+                .defineInRange("restoreBlocksPerTickV2", 1000, 1, 20000);
         B.pop();
     }
 

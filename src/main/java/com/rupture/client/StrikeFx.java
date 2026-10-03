@@ -29,7 +29,7 @@ final class StrikeFx {
     private final float charge, impactRadius;
     /** Насколько вихрь расширяется на каждый блок от меча. */
     private final double spread;
-    private static final double MAX_RADIUS = 40.0;
+    private static final double MAX_RADIUS = 100.0;
     private int age;
 
     StrikeFx(Vec3 start, Vec3 end, float charge, float impactRadius) {
@@ -43,7 +43,7 @@ final class StrikeFx {
         Vec3 up = Math.abs(dir.y) > 0.95 ? new Vec3(1, 0, 0) : new Vec3(0, 1, 0);
         this.u = dir.cross(up).normalize();
         this.v = dir.cross(u).normalize();
-        this.spread = 0.05 + 0.09 * charge;
+        this.spread = (0.05 + 0.09 * charge) * 2.5;
     }
 
     /** Радиус вихря растёт с расстоянием от меча: у клинка узкий, у цели огромный. */
