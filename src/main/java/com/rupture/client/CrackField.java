@@ -127,7 +127,7 @@ final class CrackField {
                 float glowW = c.width * (c.sky ? 3.5f : 4f);
                 // Широкое алое свечение + яркая сердцевина
                 quad(vc, pose, cam, a, b, glowW, 0.85f, 0.03f, 0.05f, 0.30f * vis * flicker);
-                quad(vc, pose, cam, a, b, c.width, 1.0f, 0.45f, 0.35f, 0.95f * vis * flicker);
+                quad(vc, pose, cam, a, b, c.width, 1.0f, 0.15f, 0.1f, 0.95f * vis * flicker);
             }
         }
     }

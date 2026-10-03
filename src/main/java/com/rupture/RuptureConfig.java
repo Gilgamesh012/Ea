@@ -53,8 +53,8 @@ public final class RuptureConfig {
         B.pop();
 
         B.push("beam");
-        BEAM_RANGE = B.comment("Дальность луча, блоков")
-                .defineInRange("beamRange", 64.0, 4.0, 256.0);
+        BEAM_RANGE = B.comment("Дальность «Энума Элиш», блоков")
+                .defineInRange("beamRangeBlocks", 256.0, 4.0, 1024.0);
         CONE_HALF_ANGLE = B.comment("Половина угла конуса луча, градусы")
                 .defineInRange("coneHalfAngle", 10.0, 0.0, 60.0);
         IMPACT_RADIUS_MAX = B.comment("Радиус урона в точке удара на 100% заряда (растёт пропорционально заряду)")

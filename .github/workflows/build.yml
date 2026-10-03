@@ -25,4 +25,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest build/libs/*.jar --title "Latest build (${GITHUB_SHA::7})" --notes "Автосборка из коммита ${GITHUB_SHA::7}" --latest
+          VER=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+          gh release create latest build/libs/*.jar --title "v$VER (${GITHUB_SHA::7})" --notes "Автосборка из коммита ${GITHUB_SHA::7}" --latest

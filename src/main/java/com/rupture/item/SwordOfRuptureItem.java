@@ -5,7 +5,6 @@ import com.rupture.strike.RuptureStrike;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.DustParticleOptions;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
@@ -159,7 +158,7 @@ public class SwordOfRuptureItem extends SwordItem {
         double x = entity.getX() + (rnd.nextDouble() - 0.5) * 2.5;
         double y = entity.getY() + rnd.nextDouble() * 2.0;
         double z = entity.getZ() + (rnd.nextDouble() - 0.5) * 2.5;
-        level.addParticle(rnd.nextBoolean() ? ParticleTypes.REVERSE_PORTAL : new DustParticleOptions(CRIMSON, 0.6f),
+        level.addParticle(new DustParticleOptions(CRIMSON, 0.5f + rnd.nextFloat() * 0.5f),
                 x, y, z, 0, 0.01, 0);
     }
 

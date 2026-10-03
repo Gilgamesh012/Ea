@@ -26,7 +26,12 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import com.rupture.registry.ModItems;
+import net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.ModelEvent;
+import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
+import net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.client.event.ViewportEvent;
@@ -51,7 +56,7 @@ import java.util.UUID;
 public final class ClientFx {
     private static final Vector3f CRIMSON = new Vector3f(0.9f, 0.04f, 0.06f);
     private static final Vector3f BLOOD = new Vector3f(0.45f, 0.0f, 0.03f);
-    private static final Vector3f VIOLET = new Vector3f(0.5f, 0.08f, 0.8f);
+    private static final Vector3f SCARLET = new Vector3f(1.0f, 0.02f, 0.02f);
 
     private static final Map<UUID, CrackField> casterFields = new HashMap<>();
     private static final List<CrackField> fadingFields = new ArrayList<>();
@@ -160,16 +165,17 @@ public final class ClientFx {
                 double r = baseR * (0.55 + 0.45 * (h / height));
                 double x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
                 double vx = -Math.sin(a) * 0.12 * (0.5 + charge), vz = Math.cos(a) * 0.12 * (0.5 + charge);
-                level.addParticle(new DustColorTransitionOptions(rnd.nextFloat() < 0.75f ? CRIMSON : BLOOD, VIOLET, 0.9f + charge * 1.6f),
+                level.addParticle(new DustColorTransitionOptions(rnd.nextFloat() < 0.75f ? SCARLET : CRIMSON, BLOOD, 0.9f + charge * 1.6f),
                         x, cy + h, z, vx, 0.03 + charge * 0.05, vz);
             }
         }
 
-        // 2. Пространство затягивает к мечу
+        // 2. Пространство затягивает к мечу: алые искры летят к игроку
         int pull = (int) ((1 + charge * 4) * density);
         for (int i = 0; i < pull; i++) {
-            level.addParticle(ParticleTypes.REVERSE_PORTAL,
-                    cx + (rnd.nextDouble() - 0.5) * 6, cy + rnd.nextDouble() * 3, cz + (rnd.nextDouble() - 0.5) * 6, 0, 0, 0);
+            double ox = (rnd.nextDouble() - 0.5) * 7, oy = rnd.nextDouble() * 3, oz = (rnd.nextDouble() - 0.5) * 7;
+            level.addParticle(new DustParticleOptions(SCARLET, 0.7f + charge),
+                    cx + ox, cy + oy, cz + oz, -ox * 0.08, (1.0 - oy) * 0.04, -oz * 0.08);
         }
 
         // 3. С 35%: земля трескается, обломки поднимаются в вихрь
@@ -294,6 +300,28 @@ public final class ClientFx {
         @SubscribeEvent
         public static void registerLayers(RegisterGuiLayersEvent event) {
             event.registerAbove(VanillaGuiLayers.CAMERA_OVERLAYS, RuptureMod.id("rupture_overlay"), ClientFx::renderOverlay);
+        }
+
+        /** Части модели Эа (рукоять и три цилиндра) грузятся как отдельные модели. */
+        @SubscribeEvent
+        public static void registerModels(ModelEvent.RegisterAdditional event) {
+            event.register(EaSwordRenderer.STATIC);
+            event.register(EaSwordRenderer.CYL_1);
+            event.register(EaSwordRenderer.CYL_2);
+            event.register(EaSwordRenderer.CYL_3);
+        }
+
+        @SubscribeEvent
+        public static void registerItemRenderer(RegisterClientExtensionsEvent event) {
+            event.registerItem(new IClientItemExtensions() {
+                private EaSwordRenderer renderer;
+
+                @Override
+                public BlockEntityWithoutLevelRenderer getCustomRenderer() {
+                    if (renderer == null) renderer = new EaSwordRenderer();
+                    return renderer;
+                }
+            }, ModItems.SWORD_OF_RUPTURE.get());
         }
     }
 }
