@@ -63,6 +63,9 @@ public final class ClientFx {
     private static final List<StrikeFx> strikes = new ArrayList<>();
     /** Горизонтальный вихрь вокруг заряжающего: {угол, угол прошлого тика, заряд}. */
     private static final Map<UUID, float[]> casterSpin = new HashMap<>();
+    /** Свечение бездны над кратерами: {x, y, z, радиус, глубина, заряд, возраст}. */
+    private static final List<float[]> abysses = new ArrayList<>();
+    private static final int ABYSS_LIFE = 260;
 
     /** «Напряжение мира» 0..1: от заряда ближайшего заряжающего игрока. Управляет тьмой, туманом, тряской. */
     private static float tension, tensionPrev;
@@ -75,7 +78,7 @@ public final class ClientFx {
 
     public static void onStrike(StrikeFxPayload p) {
         if (Minecraft.getInstance().level == null) return;
-        strikes.add(new StrikeFx(p.start(), p.end(), p.charge(), p.impactRadius()));
+        strikes.add(new StrikeFx(p.start(), p.end(), p.charge(), p.impactRadius(), p.craterDepth()));
         // Отдача у самого меча
         Player me = Minecraft.getInstance().player;
         if (me != null && me.position().distanceTo(p.start()) < 4) {
@@ -84,7 +87,7 @@ public final class ClientFx {
     }
 
     /** Вызывается из StrikeFx, когда вихрь достиг цели. */
-    static void onImpact(Vec3 at, float charge, float radius) {
+    static void onImpact(Vec3 at, float charge, float radius, float depth) {
         Player me = Minecraft.getInstance().player;
         if (me == null) return;
         double dist = me.position().distanceTo(at);
@@ -92,8 +95,14 @@ public final class ClientFx {
         // На слабом заряде мир только «моргает»
         impactShake = Math.max(impactShake, (0.15f + charge * 0.85f) * near);
         flash = Math.max(flash, (0.35f + charge * 0.65f) * near);
-        fadingFields.add(CrackField.aroundImpact(at, (long) (at.x * 31 + at.z * 17 + ticks), Math.max(1.5f, radius), charge,
-                60 + (int) (charge * 80)));
+        long seed = (long) (at.x * 31 + at.z * 17 + ticks);
+        fadingFields.add(CrackField.aroundImpact(at, seed, Math.max(1.5f, radius), charge, 60 + (int) (charge * 80)));
+        // Раскол неба и земли: разлом в небе над кратером (с 40% заряда)
+        if (charge >= 0.4f) {
+            fadingFields.add(CrackField.skyRift(at, seed ^ 0x5EEDL, radius, charge, 200 + (int) (charge * 200)));
+        }
+        // Из глубины кратера поднимается тьма подземного мира
+        abysses.add(new float[]{(float) at.x, (float) at.y, (float) at.z, radius, depth, charge, 0f});
     }
 
     // ================================================================ тик
@@ -106,6 +115,7 @@ public final class ClientFx {
         if (level == null || me == null) {
             casterFields.clear();
             casterSpin.clear();
+            abysses.clear();
             fadingFields.clear();
             strikes.clear();
             tension = tensionPrev = impactShake = flash = 0f;
@@ -132,10 +142,11 @@ public final class ClientFx {
                 return CrackField.aroundCaster(p.position(), u.getLeastSignificantBits() ^ ticks);
             });
             field.charge = charge;
-            float[] spin = casterSpin.computeIfAbsent(id, u -> new float[3]);
+            float[] spin = casterSpin.computeIfAbsent(id, u -> new float[4]);
             spin[1] = spin[0];
             spin[0] += 0.07f + 0.5f * charge;   // скорость вращения растёт с зарядом
             spin[2] = charge;
+            spin[3] += 1f;                      // тиков с начала зарядки (золотая рябь Врат Вавилона)
             spawnChargeParticles(level, p, charge);
         }
         // Игрок перестал заряжать — его трещины гаснут
@@ -155,7 +166,33 @@ public final class ClientFx {
         flash *= 0.84f;
 
         strikes.removeIf(s -> !s.tick(level));
+        abysses.removeIf(a -> !tickAbyss(level, a));
         fadingFields.removeIf(f -> !f.tick());
+    }
+
+    /** Тьма и алое свечение поднимаются из глубины кратера (подземный мир сквозь разрыв). */
+    private static boolean tickAbyss(ClientLevel level, float[] a) {
+        a[6] += 1f;
+        float age = a[6];
+        if (age > ABYSS_LIFE) return false;
+        RandomSource rnd = level.random;
+        float fade = age < 20 ? age / 20f : Math.max(0f, 1f - (age - 20) / (ABYSS_LIFE - 20f));
+        double radius = a[3], depth = a[4];
+        int n = (int) ((3 + a[5] * 10 + radius * 0.25) * fade * ClientConfig.particles());
+        for (int i = 0; i < n; i++) {
+            double ang = rnd.nextDouble() * Math.PI * 2, r = Math.sqrt(rnd.nextDouble()) * radius * 0.9;
+            double x = a[0] + Math.cos(ang) * r, z = a[2] + Math.sin(ang) * r;
+            // чем ближе к центру, тем глубже дно
+            double bottom = a[1] - depth * Math.sqrt(Math.max(0, 1 - (r * r) / (radius * radius)));
+            double y = bottom + rnd.nextDouble() * 3;
+            if (rnd.nextFloat() < 0.5f) {
+                level.addParticle(ParticleTypes.LARGE_SMOKE, x, y, z, 0, 0.15 + rnd.nextDouble() * 0.25, 0);
+            } else {
+                level.addParticle(new DustColorTransitionOptions(SCARLET, BLOOD, 2.0f + (float) rnd.nextDouble() * 2f),
+                        x, y, z, 0, 0.2 + rnd.nextDouble() * 0.3, 0);
+            }
+        }
+        return true;
     }
 
     /** Алый вихрь вокруг заряжающего: спирали, затягивание пространства, подъём обломков, осыпание мира. */
@@ -285,7 +322,11 @@ public final class ClientFx {
         if (mc.level != null && !casterSpin.isEmpty()) {
             for (AbstractClientPlayer p : mc.level.players()) {
                 float[] spin = casterSpin.get(p.getUUID());
-                if (spin != null) renderCasterVortex(vc, pose, cam, p.getPosition(partial), Mth.lerp(partial, spin[1], spin[0]), spin[2], time);
+                if (spin != null) {
+                    Vec3 pos = p.getPosition(partial);
+                    renderCasterVortex(vc, pose, cam, pos, Mth.lerp(partial, spin[1], spin[0]), spin[2], time);
+                    if (spin[3] < 30f) renderGateRipple(vc, pose, cam, p, pos, spin[3] + partial);
+                }
             }
         }
         buffers.endBatch(RenderType.lightning());
@@ -323,6 +364,35 @@ public final class ClientFx {
                     }
                     prev = pt;
                 }
+            }
+        }
+    }
+
+    /**
+     * Врата Вавилона: в начале зарядки за спиной расходится золотая рябь — Эа извлечён из сокровищницы.
+     */
+    private static void renderGateRipple(VertexConsumer vc, Matrix4f pose, Vec3 cam, Player p, Vec3 pos, float age) {
+        Vec3 look = p.getViewVector(1f);
+        Vec3 flat = new Vec3(look.x, 0, look.z);
+        if (flat.lengthSqr() < 1.0e-4) flat = new Vec3(0, 0, 1);
+        flat = flat.normalize();
+        Vec3 c = pos.add(0, 1.5, 0).subtract(flat.scale(0.9));
+        Vec3 u = new Vec3(-flat.z, 0, flat.x);
+        Vec3 v = new Vec3(0, 1, 0);
+        for (int ring = 0; ring < 3; ring++) {
+            float t = (age - ring * 4f) / 22f;
+            if (t <= 0f || t >= 1f) continue;
+            double r = 0.15 + t * 1.6;
+            float alpha = (1f - t) * 0.9f;
+            Vec3 prev = null;
+            for (int i = 0; i <= 28; i++) {
+                double a = i * (Math.PI * 2 / 28);
+                Vec3 pt = c.add(u.scale(Math.cos(a) * r)).add(v.scale(Math.sin(a) * r));
+                if (prev != null) {
+                    CrackField.quad(vc, pose, cam, prev, pt, 0.12f, 1.0f, 0.7f, 0.15f, alpha * 0.35f);
+                    CrackField.quad(vc, pose, cam, prev, pt, 0.035f, 1.0f, 0.9f, 0.5f, alpha);
+                }
+                prev = pt;
             }
         }
     }

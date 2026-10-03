@@ -1,6 +1,5 @@
 package com.rupture.restore;
 
-import com.rupture.RuptureConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
@@ -14,6 +13,6 @@ public final class RestoreManager {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         RuptureSavedData data = RuptureSavedData.get(level);
         if (!data.hasJobs()) return;
-        data.tick(level, RuptureConfig.RESTORE_BLOCKS_PER_TICK.get());
+        data.tick(level);
     }
 }

@@ -55,8 +55,45 @@ final class CrackField {
         for (int i = 0; i < count; i++) {
             Vec3 dir = new Vec3(rnd.nextGaussian(), rnd.nextGaussian() * 0.7, rnd.nextGaussian()).normalize();
             Vec3 start = anchor.add(dir.scale(radius * (0.6 + rnd.nextDouble() * 0.7)));
-            f.addCrack(rnd, start, 0f, 0.016f + charge * 0.014f, false, 5 + rnd.nextInt(6), 0.3, 0.9);
+            float w = (0.016f + charge * 0.014f) * (1f + radius * 0.03f);
+            double segLen = 0.3 + radius * 0.04;
+            f.addCrack(rnd, start, 0f, w, false, 5 + rnd.nextInt(6), segLen, segLen * 3);
         }
+        f.charge = 1f;
+        f.life = ticks;
+        return f;
+    }
+
+    /**
+     * «Расколотые небо и земля»: огромный рваный разлом в небе над кратером.
+     * Ширина — во весь кратер, висит, пока мир не соберётся.
+     */
+    static CrackField skyRift(Vec3 impact, long seed, float radius, float charge, int ticks) {
+        CrackField f = new CrackField(impact);
+        RandomSource rnd = RandomSource.create(seed);
+        double span = Math.max(12.0, radius * 2.4);
+        double y = impact.y + 35 + radius * 0.6;
+        double ang = rnd.nextDouble() * Math.PI;
+        Vec3 dir = new Vec3(Math.cos(ang), 0, Math.sin(ang));
+        Vec3 start = new Vec3(impact.x, y, impact.z).subtract(dir.scale(span / 2));
+        int segs = 14 + (int) (charge * 10);
+        double segLen = span / segs;
+        float width = 0.12f + charge * 0.25f + radius * 0.01f;
+        // главный шов
+        List<Vec3> pts = new ArrayList<>();
+        Vec3 p = start;
+        pts.add(p);
+        for (int i = 0; i < segs; i++) {
+            Vec3 side = new Vec3(-dir.z, 0, dir.x).scale((rnd.nextDouble() - 0.5) * segLen * 0.9);
+            p = p.add(dir.scale(segLen)).add(side).add(0, (rnd.nextDouble() - 0.5) * segLen * 0.5, 0);
+            pts.add(p);
+            // ответвления — трещины расходятся по небу
+            if (rnd.nextFloat() < 0.55f) {
+                Vec3 bdir = new Vec3(rnd.nextGaussian(), rnd.nextGaussian() * 0.3, rnd.nextGaussian()).normalize();
+                f.addCrack(rnd, p, 0f, width * 0.45f, true, 3 + rnd.nextInt(4), segLen * 0.4, segLen * 1.2);
+            }
+        }
+        f.cracks.add(new Crack(0f, pts, width, true));
         f.charge = 1f;
         f.life = ticks;
         return f;

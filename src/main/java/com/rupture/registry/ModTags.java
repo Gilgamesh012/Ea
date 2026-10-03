@@ -16,5 +16,8 @@ public final class ModTags {
     /** «Истинный» разрыв — в обход брони, эффектов, зачарований, щита и i-frames (см. теги damage_type). */
     public static final ResourceKey<DamageType> RUPTURE_TRUE = ResourceKey.create(Registries.DAMAGE_TYPE, RuptureMod.id("rupture_true"));
 
+    /** Анти-мировой удар на 100% заряда: обходит всё, включая неуязвимость и тотем бессмертия. */
+    public static final ResourceKey<DamageType> RUPTURE_ABSOLUTE = ResourceKey.create(Registries.DAMAGE_TYPE, RuptureMod.id("rupture_absolute"));
+
     private ModTags() {}
 }

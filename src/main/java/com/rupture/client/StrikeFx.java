@@ -2,6 +2,7 @@ package com.rupture.client;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.rupture.ClientConfig;
+import com.rupture.RuptureMath;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.particles.DustColorTransitionOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -26,13 +27,12 @@ final class StrikeFx {
 
     private final Vec3 start, end, dir, u, v;
     private final double length;
-    private final float charge, impactRadius;
-    /** Насколько вихрь расширяется на каждый блок от меча. */
-    private final double spread;
-    private static final double MAX_RADIUS = 100.0;
+    private final float charge, impactRadius, craterDepth;
+
     private int age;
 
-    StrikeFx(Vec3 start, Vec3 end, float charge, float impactRadius) {
+    StrikeFx(Vec3 start, Vec3 end, float charge, float impactRadius, float craterDepth) {
+        this.craterDepth = craterDepth;
         this.start = start;
         this.end = end;
         this.charge = charge;
@@ -43,12 +43,12 @@ final class StrikeFx {
         Vec3 up = Math.abs(dir.y) > 0.95 ? new Vec3(1, 0, 0) : new Vec3(0, 1, 0);
         this.u = dir.cross(up).normalize();
         this.v = dir.cross(u).normalize();
-        this.spread = (0.05 + 0.09 * charge) * 2.5;
+
     }
 
     /** Радиус вихря растёт с расстоянием от меча: у клинка узкий, у цели огромный. */
     private double radiusAt(double d) {
-        return Math.min(MAX_RADIUS, 0.3 + charge * 0.5 + d * spread);
+        return RuptureMath.vortexRadius(d, charge);
     }
 
     private Vec3 around(double d, double angle, double r) {
@@ -93,7 +93,7 @@ final class StrikeFx {
         }
 
         if (age == TRAVEL) {
-            ClientFx.onImpact(end, charge, impactRadius);
+            ClientFx.onImpact(end, charge, impactRadius, craterDepth);
             level.addParticle(ParticleTypes.FLASH, end.x, end.y, end.z, 0, 0, 0);
             int emitters = charge >= 0.5f ? 1 + (int) (charge * 3) : 0;
             for (int i = 0; i < emitters; i++) {

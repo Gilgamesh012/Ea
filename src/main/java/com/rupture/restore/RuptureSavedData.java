@@ -1,5 +1,6 @@
 package com.rupture.restore;
 
+import com.rupture.RuptureConfig;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -14,7 +15,7 @@ import java.util.Iterator;
 import java.util.List;
 
 /**
- * Очередь разрывов, ожидающих восстановления. Хранится в каждом измерении отдельно
+ * Очередь кратеров. Хранится в каждом измерении отдельно
  * (world/[dim]/data/rupture_restore.dat), поэтому переживает перезапуск сервера.
  */
 public final class RuptureSavedData extends SavedData {
@@ -37,28 +38,25 @@ public final class RuptureSavedData extends SavedData {
         return !jobs.isEmpty();
     }
 
-    /** Восстанавливает готовые разрывы, не больше {@code budget} блоков за тик на измерение. */
-    void tick(ServerLevel level, int budget) {
+    void tick(ServerLevel level) {
         if (jobs.isEmpty()) return;
-        long now = level.getGameTime();
-        boolean changed = false;
+        int carve = RuptureConfig.CARVE_BLOCKS_PER_TICK.get();
+        int visit = carve * 4;
+        int restore = RuptureConfig.RESTORE_BLOCKS_PER_TICK.get();
 
         Iterator<RestoreJob> it = jobs.iterator();
-        while (it.hasNext() && budget > 0) {
+        while (it.hasNext()) {
             RestoreJob job = it.next();
-            if (!job.isReady(now)) continue;
-
-            budget -= job.restoreSome(level, budget);
-            changed = true;
-
+            job.tick(level, carve, visit, restore);
             if (job.isDone()) {
+                job.releaseChunks(level);
                 var c = job.center();
                 level.playSound(null, c.getX() + 0.5, c.getY() + 0.5, c.getZ() + 0.5,
-                        SoundEvents.RESPAWN_ANCHOR_SET_SPAWN, SoundSource.BLOCKS, 2.0f, 0.6f);
+                        SoundEvents.RESPAWN_ANCHOR_SET_SPAWN, SoundSource.BLOCKS, 4.0f, 0.6f);
                 it.remove();
             }
         }
-        if (changed) setDirty();
+        setDirty();
     }
 
     @Override

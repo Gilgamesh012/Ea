@@ -1,4 +1,7 @@
 {
   "replace": false,
-  "values": ["rupture:rupture_true"]
+  "values": [
+    "rupture:rupture_true",
+    "rupture:rupture_absolute"
+  ]
 }

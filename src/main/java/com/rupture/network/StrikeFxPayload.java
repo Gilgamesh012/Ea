@@ -10,7 +10,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 /**
  * Сервер → клиенты: «Энума Элиш» выпущен. Клиенты рисуют алый вихрь, вспышку и тряску.
  */
-public record StrikeFxPayload(Vec3 start, Vec3 end, float charge, float impactRadius) implements CustomPacketPayload {
+public record StrikeFxPayload(Vec3 start, Vec3 end, float charge, float impactRadius, float craterDepth) implements CustomPacketPayload {
     public static final Type<StrikeFxPayload> TYPE = new Type<>(RuptureMod.id("strike_fx"));
 
     public static final StreamCodec<FriendlyByteBuf, StrikeFxPayload> CODEC =
@@ -21,12 +21,13 @@ public record StrikeFxPayload(Vec3 start, Vec3 end, float charge, float impactRa
         buf.writeDouble(p.end.x); buf.writeDouble(p.end.y); buf.writeDouble(p.end.z);
         buf.writeFloat(p.charge);
         buf.writeFloat(p.impactRadius);
+        buf.writeFloat(p.craterDepth);
     }
 
     private static StrikeFxPayload read(FriendlyByteBuf buf) {
         Vec3 s = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
         Vec3 e = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
-        return new StrikeFxPayload(s, e, buf.readFloat(), buf.readFloat());
+        return new StrikeFxPayload(s, e, buf.readFloat(), buf.readFloat(), buf.readFloat());
     }
 
     @Override
