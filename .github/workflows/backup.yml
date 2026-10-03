@@ -1,0 +1,46 @@
+name: Backup old versions
+on:
+  push:
+    paths: ['.github/backup-versions.txt']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  tags:
+    runs-on: ubuntu-latest
+    outputs:
+      builds: ${{ steps.list.outputs.builds }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - name: Create missing version tags (source backups)
+        id: list
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          builds="["
+          while read -r tag sha build; do
+            case "$tag" in ''|\#*) continue;; esac
+            if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null && echo "tag $tag -> $sha"
+            fi
+            if [ "$build" = "1" ] && ! gh release view "$tag" >/dev/null 2>&1; then builds="$builds\"$tag\","; fi
+          done < .github/backup-versions.txt
+          builds="${builds%,}]"
+          echo "builds=$builds" >> "$GITHUB_OUTPUT"
+  build:
+    needs: tags
+    if: needs.tags.outputs.builds != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tag: ${{ fromJson(needs.tags.outputs.builds) }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ matrix.tag }}' }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v5
+      - run: chmod +x gradlew && ./gradlew build --no-daemon
+      - name: Release backup binary
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: gh release create "${{ matrix.tag }}" build/libs/*.jar --verify-tag --title "${{ matrix.tag }}" --notes "Бэкап версии ${{ matrix.tag }}" --latest=false

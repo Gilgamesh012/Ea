@@ -32,5 +32,5 @@ jobs:
           NOTES=$(awk "/^## $VER/{f=1;next} /^## /{f=0} f" CHANGELOG.md)
           gh release create "v$VER" build/libs/*.jar --target "$GITHUB_SHA" --title "v$VER" --notes "${NOTES:-Версия $VER}" --latest=false
           # Храним бинарники текущей и двух предыдущих версий; теги (исходники) не удаляем
-          gh release list --limit 100 --json tagName,createdAt -q '[.[] | select(.tagName|startswith("v"))] | sort_by(.createdAt) | reverse | .[3:] | .[].tagName' \
+          gh release list --limit 100 --json tagName -q '.[].tagName' | grep '^v' | sort -V -r | tail -n +4 \
             | while read -r t; do gh release delete "$t" --yes || true; done
