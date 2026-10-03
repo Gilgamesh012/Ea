@@ -6,41 +6,51 @@ on:
 permissions:
   contents: write
 jobs:
-  tags:
+  prepare:
     runs-on: ubuntu-latest
     outputs:
       builds: ${{ steps.list.outputs.builds }}
     steps:
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0 }
-      - name: Create missing version tags (source backups)
-        id: list
-        env: { GH_TOKEN: '${{ github.token }}' }
+      - id: list
         run: |
-          builds="["
-          while read -r tag sha build; do
-            case "$tag" in ''|\#*) continue;; esac
-            if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-              gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null && echo "tag $tag -> $sha"
-            fi
-            if [ "$build" = "1" ] && ! gh release view "$tag" >/dev/null 2>&1; then builds="$builds\"$tag\","; fi
-          done < .github/backup-versions.txt
-          builds="${builds%,}]"
-          echo "builds=$builds" >> "$GITHUB_OUTPUT"
+          b=$(awk '!/^#/ && NF==3 && $3=="1" {printf "%s{\"tag\":\"%s\",\"sha\":\"%s\"}", (n++?",":""), $1, $2}' .github/backup-versions.txt)
+          echo "builds=[$b]" >> "$GITHUB_OUTPUT"
   build:
-    needs: tags
-    if: needs.tags.outputs.builds != '[]'
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        tag: ${{ fromJson(needs.tags.outputs.builds) }}
+        v: ${{ fromJson(needs.prepare.outputs.builds) }}
     steps:
       - uses: actions/checkout@v5
-        with: { ref: '${{ matrix.tag }}' }
+        with: { ref: '${{ matrix.v.sha }}' }
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v5
       - run: chmod +x gradlew && ./gradlew build --no-daemon
-      - name: Release backup binary
+      - uses: actions/upload-artifact@v5
+        with: { name: 'jar-${{ matrix.v.tag }}', path: build/libs/*.jar }
+  archive:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: actions/download-artifact@v5
+        with: { path: jars, merge-multiple: true }
+      - name: Source zips of every version
+        run: |
+          mkdir -p out
+          while read -r tag sha build; do
+            case "$tag" in ''|\#*) continue;; esac
+            git archive --format=zip -o "out/sword-of-rupture-src-$tag.zip" "$sha"
+          done < .github/backup-versions.txt
+          cp jars/*.jar out/
+          ls -la out
+      - name: Publish "archive" release (one release, all old versions)
         env: { GH_TOKEN: '${{ github.token }}' }
-        run: gh release create "${{ matrix.tag }}" build/libs/*.jar --verify-tag --title "${{ matrix.tag }}" --notes "Бэкап версии ${{ matrix.tag }}" --latest=false
+        run: |
+          gh release delete archive --yes --cleanup-tag || true
+          gh release create archive out/* --target "$GITHUB_SHA" --title "Архив старых версий" \
+            --notes "Исходники всех версий до 1.8.0 (zip) и собранные jar 1.6.1 и 1.7.0. Новые версии бэкапятся отдельными релизами v<версия>." --latest=false
