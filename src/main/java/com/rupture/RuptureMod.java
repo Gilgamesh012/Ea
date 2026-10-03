@@ -38,6 +38,9 @@ public class RuptureMod {
 
         // Восстановление мира — тикается на игровой шине.
         NeoForge.EVENT_BUS.addListener(RestoreManager::onLevelTick);
+        // Полёт при зарядке: снятие способности и мягкое приземление
+        NeoForge.EVENT_BUS.addListener(com.rupture.flight.ChargeFlight::onPlayerTick);
+        NeoForge.EVENT_BUS.addListener(com.rupture.flight.ChargeFlight::onFall);
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {

@@ -115,6 +115,7 @@ public final class ClientFx {
         if (level == null || me == null) {
             casterFields.clear();
             casterSpin.clear();
+            redBolts.clear();
             abysses.clear();
             fadingFields.clear();
             strikes.clear();
@@ -143,6 +144,12 @@ public final class ClientFx {
             });
             field.charge = charge;
             float[] spin = casterSpin.computeIfAbsent(id, u -> new float[4]);
+            // Порог 60%: удар красных молний и гром; дальше — редкие разряды
+            if (spin[2] < 0.6f && charge >= 0.6f) {
+                for (int i = 0; i < 3; i++) strikeRedLightning(level, p, i == 0);
+            } else if (charge >= 0.6f && level.random.nextFloat() < 0.012f + 0.02f * charge) {
+                strikeRedLightning(level, p, false);
+            }
             spin[1] = spin[0];
             spin[0] += 0.07f + 0.5f * charge;   // скорость вращения растёт с зарядом
             spin[2] = charge;
@@ -160,39 +167,69 @@ public final class ClientFx {
             }
         }
 
-        tickLevitation(mc, me);
         tensionPrev = tension;
         tension += (target - tension) * 0.12f;
         impactShake *= 0.9f;
         flash *= 0.84f;
 
+        redBolts.removeIf(b -> ++b.age()[0] > 9);
         strikes.removeIf(s -> !s.tick(level));
         abysses.removeIf(a -> !tickAbyss(level, a));
         fadingFields.removeIf(f -> !f.tick());
     }
 
-    /** Высота, с которой начали заряжать: выше неё + LEVITATE_MAX подняться нельзя. */
-    private static double levitateBaseY = Double.NaN;
-    private static final double LEVITATE_MAX = 6.0;
-
     /**
-     * Лёгкая левитация во время зарядки: зажат прыжок — плавно поднимаешься (~2.4 блока/с, медленнее творческого полёта),
-     * отпустил — медленно парешь вниз. Не выше 6 блоков над точкой начала зарядки.
+     * Полёт при зарядке: использование предмета режет ввод движения до 20%. Возвращаем часть,
+     * чтобы полёт был управляемым (~70% ввода при скорости полёта ~45% творческого).
      */
-    private static void tickLevitation(Minecraft mc, Player me) {
-        boolean charging = me.isUsingItem() && me.getUseItem().getItem() instanceof SwordOfRuptureItem;
-        if (!charging || me.getAbilities().flying) {
-            levitateBaseY = Double.NaN;
-            return;
+    @SubscribeEvent
+    public static void onMovementInput(net.neoforged.neoforge.client.event.MovementInputUpdateEvent event) {
+        Player p = event.getEntity();
+        if (!p.getAbilities().flying || !p.isUsingItem() || !(p.getUseItem().getItem() instanceof SwordOfRuptureItem)) return;
+        event.getInput().forwardImpulse *= 3.5f;
+        event.getInput().leftImpulse *= 3.5f;
+    }
+
+    /** Красные молнии: точки, ответвления, возраст. */
+    private record RedBolt(List<Vec3> points, List<List<Vec3>> branches, int[] age) {}
+    private static final List<RedBolt> redBolts = new ArrayList<>();
+
+    /** Красная молния бьёт с неба в землю рядом с владельцем + гром. */
+    private static void strikeRedLightning(ClientLevel level, Player p, boolean loud) {
+        RandomSource rnd = level.random;
+        double ang = rnd.nextDouble() * Math.PI * 2, r = 4 + rnd.nextDouble() * 12;
+        Vec3 ground = new Vec3(p.getX() + Math.cos(ang) * r, p.getY() - 0.5, p.getZ() + Math.sin(ang) * r);
+        Vec3 sky = ground.add((rnd.nextDouble() - 0.5) * 10, 35 + rnd.nextDouble() * 25, (rnd.nextDouble() - 0.5) * 10);
+        List<Vec3> pts = jagged(rnd, sky, ground, 16, 1.6);
+        List<List<Vec3>> branches = new ArrayList<>();
+        for (int i = 2; i < pts.size() - 3; i++) {
+            if (rnd.nextFloat() < 0.3f) {
+                Vec3 from = pts.get(i);
+                Vec3 to = from.add(new Vec3(rnd.nextGaussian(), -0.6 - rnd.nextDouble(), rnd.nextGaussian()).normalize().scale(4 + rnd.nextDouble() * 6));
+                branches.add(jagged(rnd, from, to, 5, 0.8));
+            }
         }
-        if (Double.isNaN(levitateBaseY)) levitateBaseY = me.getY();
-        Vec3 v = me.getDeltaMovement();
-        if (mc.options.keyJump.isDown() && me.getY() < levitateBaseY + LEVITATE_MAX) {
-            me.setDeltaMovement(v.x, Math.max(v.y, 0.12), v.z);
-        } else if (!me.onGround()) {
-            me.setDeltaMovement(v.x, Math.max(v.y, -0.06), v.z);   // мягкое парение вниз
+        redBolts.add(new RedBolt(pts, branches, new int[]{0}));
+        level.playLocalSound(ground.x, ground.y, ground.z, net.minecraft.sounds.SoundEvents.LIGHTNING_BOLT_THUNDER,
+                net.minecraft.sounds.SoundSource.WEATHER, loud ? 6f : 3f, 0.7f + rnd.nextFloat() * 0.2f, false);
+        level.playLocalSound(ground.x, ground.y, ground.z, net.minecraft.sounds.SoundEvents.LIGHTNING_BOLT_IMPACT,
+                net.minecraft.sounds.SoundSource.WEATHER, loud ? 2f : 1.2f, 0.6f + rnd.nextFloat() * 0.2f, false);
+        for (int i = 0; i < 6; i++) {
+            level.addParticle(new DustParticleOptions(SCARLET, 1.5f), ground.x + rnd.nextGaussian() * 0.5, ground.y + 0.3,
+                    ground.z + rnd.nextGaussian() * 0.5, 0, 0.1, 0);
         }
-        me.resetFallDistance();
+        Player me = Minecraft.getInstance().player;
+        if (me != null && p.distanceTo(me) < 32) flash = Math.max(flash, loud ? 0.35f : 0.18f);
+    }
+
+    private static List<Vec3> jagged(RandomSource rnd, Vec3 a, Vec3 b, int segs, double jitter) {
+        List<Vec3> pts = new ArrayList<>();
+        for (int i = 0; i <= segs; i++) {
+            Vec3 p = a.add(b.subtract(a).scale(i / (double) segs));
+            if (i > 0 && i < segs) p = p.add(rnd.nextGaussian() * jitter, rnd.nextGaussian() * jitter * 0.4, rnd.nextGaussian() * jitter);
+            pts.add(p);
+        }
+        return pts;
     }
 
     /** Тьма и алое свечение поднимаются из глубины кратера (подземный мир сквозь разрыв). */
@@ -245,7 +282,7 @@ public final class ClientFx {
     private static void spawnChargeParticles(ClientLevel level, Player p, float charge) {
         RandomSource rnd = level.random;
         boolean fp = isLocalFirstPerson(p);
-        double density = ClientConfig.particles();
+        double density = ClientConfig.particles() * 0.45;   // частиц заметно меньше — основную картину дают ленты ветра
         double cx = p.getX(), cy = p.getY(), cz = p.getZ();
 
         // 1. Горизонтальный алый вихрь вокруг персонажа: радиус, высота, плотность и скорость растут с зарядом
@@ -322,7 +359,8 @@ public final class ClientFx {
     }
 
     private static float noise(float t, float seed) {
-        return Mth.sin(t * 1.9f + seed) * 0.5f + Mth.sin(t * 4.7f + seed * 2f) * 0.3f + Mth.sin(t * 9.3f + seed * 3f) * 0.2f;
+        // плавная тряска без высоких частот (иначе мир мелко дрожит, а рука нет — выглядит как рывки)
+        return Mth.sin(t * 0.8f + seed) * 0.6f + Mth.sin(t * 1.9f + seed * 2f) * 0.4f;
     }
 
     @SubscribeEvent
@@ -353,7 +391,7 @@ public final class ClientFx {
     public static void onRenderLevel(RenderLevelStageEvent event) {
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
         boolean cracks = ClientConfig.cracks();
-        if (strikes.isEmpty() && casterSpin.isEmpty() && (!cracks || fadingFields.isEmpty())) return;
+        if (strikes.isEmpty() && casterSpin.isEmpty() && redBolts.isEmpty() && (!cracks || fadingFields.isEmpty())) return;
 
         Minecraft mc = Minecraft.getInstance();
         Vec3 cam = event.getCamera().getPosition();
@@ -377,8 +415,15 @@ public final class ClientFx {
                 if (spin != null) {
                     Vec3 pos = p.getPosition(partial);
                     renderCasterVortex(vc, pose, cam, pos, Mth.lerp(partial, spin[1], spin[0]), spin[2], time);
+                    renderWind(vc, pose, cam, pos, Mth.lerp(partial, spin[1], spin[0]), spin[2], time);
                 }
             }
+        }
+        for (RedBolt b : redBolts) {
+            int age = b.age()[0];
+            float al = (age < 2 ? 1f : (age % 2 == 0 ? 0.85f : 0.45f)) * (1f - age / 10f);   // мерцание молнии
+            drawBolt(vc, pose, cam, b.points(), 0.55f, al);
+            for (List<Vec3> br : b.branches()) drawBolt(vc, pose, cam, br, 0.3f, al * 0.8f);
         }
         buffers.endBatch(RenderType.lightning());
         CrackField.setViewWindow(false, cam, Vec3.ZERO);
@@ -449,6 +494,66 @@ public final class ClientFx {
         }
     }
 
+    private static void drawBolt(VertexConsumer vc, Matrix4f pose, Vec3 cam, List<Vec3> pts, float w, float al) {
+        for (int i = 0; i < pts.size() - 1; i++) {
+            CrackField.quad(vc, pose, cam, pts.get(i), pts.get(i + 1), w * 3f, 0.9f, 0.0f, 0.03f, 0.35f * al);
+            CrackField.quad(vc, pose, cam, pts.get(i), pts.get(i + 1), w, 1.0f, 0.12f, 0.08f, 0.9f * al);
+            CrackField.quad(vc, pose, cam, pts.get(i), pts.get(i + 1), w * 0.3f, 1.0f, 0.75f, 0.7f, al);
+        }
+    }
+
+    /**
+     * Вихрь ветра как на референсе: широкие полупрозрачные бело-серые полосы смерча вокруг владельца
+     * (расширяются кверху) вперемешку с алыми, плюс алые полосы, бьющие вверх. Растёт с зарядом.
+     */
+    private static void renderWind(VertexConsumer vc, Matrix4f pose, Vec3 cam, Vec3 pos, float angle, float charge, float time) {
+        if (charge < 0.05f) return;
+        int bands = 2 + (int) (charge * 6);
+        for (int j = 0; j < bands; j++) {
+            float appear = Mth.clamp(charge * 7f - j * 0.8f, 0f, 1f);
+            if (appear <= 0.01f) continue;
+            boolean crimson = j % 3 == 2;
+            double h = 0.2 + j * (0.45 + 0.5 * charge);
+            double r = (2.2 + charge * 4.5) * (1.0 + j * 0.18);          // смерч расширяется кверху
+            double arc = 1.6 + charge * 2.2;
+            double a0 = angle * (1.25 - j * 0.05) + j * 2.1;
+            double tilt = 0.25 * Math.sin(j * 1.3 + time * 0.03);
+            int seg = 22;
+            Vec3 prev = null;
+            for (int i = 0; i <= seg; i++) {
+                double f = i / (double) seg;
+                double a = a0 - arc * (1 - f);
+                double y = pos.y + h + Math.sin(a) * tilt * r * 0.3;
+                Vec3 pt = new Vec3(pos.x + Math.cos(a) * r, y, pos.z + Math.sin(a) * r);
+                if (prev != null) {
+                    float taper = (float) Math.sin(Math.PI * f);
+                    float w = (float) ((crimson ? 0.12 : 0.35) * (0.5 + charge) * (0.35 + 0.65 * taper) * (1 + j * 0.1));
+                    float al = (crimson ? 0.6f : 0.22f) * appear * taper;
+                    if (crimson) {
+                        CrackField.quad(vc, pose, cam, prev, pt, w * 2.4f, 0.85f, 0.0f, 0.03f, al * 0.35f);
+                        CrackField.quad(vc, pose, cam, prev, pt, w, 1.0f, 0.1f, 0.06f, al);
+                    } else {
+                        CrackField.quad(vc, pose, cam, prev, pt, w * 1.8f, 0.55f, 0.58f, 0.62f, al * 0.4f);
+                        CrackField.quad(vc, pose, cam, prev, pt, w, 0.85f, 0.88f, 0.92f, al);
+                    }
+                }
+                prev = pt;
+            }
+        }
+        // Алые полосы, бьющие вверх из-под ног
+        int streaks = 2 + (int) (charge * 4);
+        double top = 3 + charge * 9;
+        for (int k = 0; k < streaks; k++) {
+            double a = angle * 0.6 + k * (Math.PI * 2 / streaks);
+            double rr = 0.8 + 0.6 * Math.sin(k * 2.7 + time * 0.05);
+            Vec3 b0 = new Vec3(pos.x + Math.cos(a) * rr, pos.y, pos.z + Math.sin(a) * rr);
+            Vec3 b1 = b0.add(Math.cos(a) * 0.6, top * (0.7 + 0.3 * Math.sin(time * 0.1 + k)), Math.sin(a) * 0.6);
+            float al = 0.45f * Mth.clamp(charge * 3f - k * 0.3f, 0f, 1f);
+            CrackField.quad(vc, pose, cam, b0, b1, 0.35f, 0.85f, 0.0f, 0.03f, al * 0.35f);
+            CrackField.quad(vc, pose, cam, b0, b1, 0.1f, 1.0f, 0.12f, 0.08f, al);
+        }
+    }
+
     // ================================================================ 2D: алая пелена и вспышка
 
     static void renderOverlay(GuiGraphics g, DeltaTracker delta) {
@@ -501,6 +606,25 @@ public final class ClientFx {
                 }
 
                 private EaSwordRenderer renderer;
+
+                /**
+                 * Первое лицо при зарядке: Эа вытянут вперёд от правого нижнего угла, остриём вдаль и чуть вбок —
+                 * центр экрана свободен. Плавный выход за ~0.3 с, без дрожи. Вне зарядки — ванильная анимация.
+                 */
+                @Override
+                public boolean applyForgeHandTransform(com.mojang.blaze3d.vertex.PoseStack ps, net.minecraft.client.player.LocalPlayer player,
+                        net.minecraft.world.entity.HumanoidArm arm, net.minecraft.world.item.ItemStack stack,
+                        float partialTick, float equipProcess, float swingProcess) {
+                    if (!player.isUsingItem() || player.getUseItem() != stack) return false;
+                    float k = Mth.clamp((player.getTicksUsingItem() + partialTick) / 6f, 0f, 1f);
+                    k = k * k * (3f - 2f * k);
+                    int side = arm == net.minecraft.world.entity.HumanoidArm.RIGHT ? 1 : -1;
+                    ps.translate(side * 0.56f, -0.52f, -0.72f);                         // ванильная точка удержания
+                    ps.translate(side * 0.18f * k, -0.22f * k, 0.15f * k);              // ниже и правее, ближе к телу
+                    ps.mulPose(com.mojang.math.Axis.YP.rotationDegrees(side * -14f * k)); // остриё чуть наружу
+                    ps.mulPose(com.mojang.math.Axis.XP.rotationDegrees(-78f * k));        // клинок вперёд, почти горизонтально
+                    return true;
+                }
 
                 @Override
                 public BlockEntityWithoutLevelRenderer getCustomRenderer() {

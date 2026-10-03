@@ -88,7 +88,23 @@ public class SwordOfRuptureItem extends SwordItem {
 
     @Override
     public UseAnim getUseAnimation(ItemStack stack) {
-        return UseAnim.SPEAR;
+        // NONE: ванильная поза копья больше не перекрывает нашу (вертикальный Эа в 3-м лице, вытянутый вперёд в 1-м)
+        return UseAnim.NONE;
+    }
+
+    /**
+     * NeoForge по умолчанию «перевзводит» предмет в руке при любой пересылке стака с сервера — рука дёргается.
+     * Перевзводим только при смене слота или самого предмета.
+     */
+    @Override
+    public boolean shouldCauseReequipAnimation(ItemStack oldStack, ItemStack newStack, boolean slotChanged) {
+        return slotChanged || !ItemStack.isSameItem(oldStack, newStack);
+    }
+
+    /** Отпустил ПКМ, сменил предмет, прервали — снимаем полёт. */
+    @Override
+    public void onStopUsing(ItemStack stack, LivingEntity entity, int count) {
+        if (entity instanceof net.minecraft.server.level.ServerPlayer sp) com.rupture.flight.ChargeFlight.stop(sp);
     }
 
     @Override
@@ -108,8 +124,8 @@ public class SwordOfRuptureItem extends SwordItem {
         }
 
         // Рёв вихря (закольцованный) играет на клиенте и следует за игроком — см. ChargeSoundInstance.
-        // Сервер: без урона от падения во время левитации (подъём/парение считает клиент — см. ClientFx.tickLevitation)
-        entity.resetFallDistance();
+        // Контролируемый медленный полёт на время зарядки
+        if (entity instanceof net.minecraft.server.level.ServerPlayer sp) com.rupture.flight.ChargeFlight.start(sp);
         // Полный заряд: суббас-удар и белая вспышка
         if (used == full) {
             level.playSound(null, x, y, z, ModSounds.FULL_CHARGE.get(), SoundSource.PLAYERS, 3.0f, 1.0f);
