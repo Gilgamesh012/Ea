@@ -1,4 +1,4 @@
-# tag commit build(1=собрать jar)
+# tag commit build(1=собрать jar) — бэкап старых версий в релиз "archive"
 v1.0.0 fd529e311e014d307ec301376bf51dee56d9b8f3 0
 v1.1.0 567e2a813f8529467a949ea83af0d65a8784b8d5 0
 v1.2.0 06d4199753a0fa9b2c34fc477850f2f32f5cac2a 0
