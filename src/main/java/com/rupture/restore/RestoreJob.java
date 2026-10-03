@@ -1,6 +1,10 @@
 package com.rupture.restore;
 
 import com.rupture.RuptureMod;
+import com.rupture.RuptureShape;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.Vec3;
 import com.rupture.registry.ModTags;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -37,14 +41,14 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Один кратер «Энума Элиш». Живёт в три фазы:
+ * Разрыв мира «Энума Элиш» — всё, чего коснулся вихрь ({@link RuptureShape}). Живёт в три фазы:
  * <ol>
  *   <li>CARVING — кратер выгрызается послойно сверху вниз (бюджет блоков за тик), снимок каждого блока сохраняется;</li>
  *   <li>WAITING — пауза перед сборкой;</li>
  *   <li>RESTORING — мир собирается обратно снизу вверх порциями.</li>
  * </ol>
- * Форма: снизу — полуэллипсоид (радиус R, глубина D), сверху — полусфера высотой до R (сносит холмы и деревья).
- * Чанки кратера принудительно держатся загруженными до конца сборки.
+ * Чанки вокруг точки удара принудительно держатся загруженными до конца сборки; в остальных
+ * незагруженных чанках вдоль луча блоки не трогаются.
  */
 public final class RestoreJob {
     static final int SILENT_FLAGS = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
@@ -52,8 +56,9 @@ public final class RestoreJob {
     enum Phase { CARVING, WAITING, RESTORING }
 
     // --- форма
+    private final RuptureShape shape;
     private final BlockPos center;
-    private final double radius, depth, height;
+    private final int minY, maxY;
     private final int maxBlocks;
     private final long delayTicks;
 
@@ -74,23 +79,27 @@ public final class RestoreJob {
     private final Set<UUID> capturedEntities = new HashSet<>();
     /** Чанки, которые принудительно загрузили мы (чужие forceload не трогаем). */
     private final LongArrayList forcedChunks = new LongArrayList();
+    /** Чанки зоны удара: их ждём, пока загрузятся; прочие незагруженные пропускаем. */
+    private final LongOpenHashSet impactChunks = new LongOpenHashSet();
 
-    private RestoreJob(BlockPos center, double radius, double depth, double height, int maxBlocks, long delayTicks) {
-        this.center = center.immutable();
-        this.radius = radius;
-        this.depth = depth;
-        this.height = height;
+    private RestoreJob(RuptureShape shape, int minY, int maxY, int maxBlocks, long delayTicks) {
+        this.shape = shape;
+        this.center = BlockPos.containing(shape.end());
+        this.minY = minY;
+        this.maxY = maxY;
         this.maxBlocks = maxBlocks;
         this.delayTicks = delayTicks;
         this.paletteIndex.defaultReturnValue(-1);
     }
 
-    /** Новый кратер: держит чанки и начинает выгрызаться со следующего тика. */
-    public static RestoreJob start(ServerLevel level, BlockPos center, double radius, double depth, int maxBlocks, long delayTicks) {
-        double height = Math.min(radius, 64.0);
-        RestoreJob job = new RestoreJob(center, radius, depth, height, maxBlocks, delayTicks);
+    /** Новый разрыв: держит чанки зоны удара и начинает выгрызаться со следующего тика. */
+    public static RestoreJob start(ServerLevel level, RuptureShape shape, int maxBlocks, long delayTicks) {
+        AABB b = shape.bounds();
+        int minY = Math.max(level.getMinBuildHeight(), (int) Math.floor(b.minY));
+        int maxY = Math.min(level.getMaxBuildHeight() - 1, (int) Math.ceil(b.maxY));
+        RestoreJob job = new RestoreJob(shape, minY, maxY, maxBlocks, delayTicks);
         job.phase = Phase.CARVING;
-        job.carveY = Math.min(level.getMaxBuildHeight() - 1, center.getY() + Mth.ceil(height));
+        job.carveY = maxY;
         job.carveIndex = 0;
         job.forceChunks(level);
         job.captureEntities(level);
@@ -108,13 +117,14 @@ public final class RestoreJob {
     // ================================================================== чанки
 
     private void forceChunks(ServerLevel level) {
-        int r = Mth.ceil(radius) + 1;
+        int r = Mth.ceil(shape.maxRadius()) + 2;
         int minCx = (center.getX() - r) >> 4, maxCx = (center.getX() + r) >> 4;
         int minCz = (center.getZ() - r) >> 4, maxCz = (center.getZ() + r) >> 4;
         var alreadyForced = level.getForcedChunks();
         for (int cx = minCx; cx <= maxCx; cx++) {
             for (int cz = minCz; cz <= maxCz; cz++) {
                 long key = ChunkPos.asLong(cx, cz);
+                impactChunks.add(key);
                 if (!alreadyForced.contains(key)) {
                     level.setChunkForced(cx, cz, true);
                     forcedChunks.add(key);
@@ -133,47 +143,37 @@ public final class RestoreJob {
 
     // ================================================================== вырезание
 
-    private boolean inside(int dx, int dy, int dz) {
-        double h2 = (dx * dx + dz * dz) / (radius * radius);
-        if (dy >= 0) return h2 + (dy * dy) / (height * height) <= 1.0;
-        return h2 + (dy * (double) dy) / (depth * depth) <= 1.0;
-    }
-
-    /** Горизонтальный радиус слоя (для обхода только нужного квадрата). */
-    private int layerRadius(int dy) {
-        double k = dy >= 0 ? (dy / height) : (dy / depth);
-        double f = 1.0 - k * k;
-        return f <= 0 ? -1 : Mth.ceil(radius * Math.sqrt(f));
+    private boolean inside(int x, int y, int z) {
+        return shape.contains(x + 0.5, y + 0.5, z + 0.5, RuptureShape.SAFE_DISTANCE);
     }
 
     /**
-     * Выгрызает часть кратера. Ждёт, пока чанк слоя загрузится, а не грузит его синхронно.
-     *
-     * @return потраченный бюджет «работы».
+     * Выгрызает часть разрыва сверху вниз. Чанки зоны удара ждёт (мы их держим), остальные незагруженные пропускает.
      */
     int carveSome(ServerLevel level, int carveBudget, int visitBudget) {
-        int minY = Math.max(level.getMinBuildHeight(), center.getY() - Mth.ceil(depth));
         int carved = 0, visited = 0;
-
         while (carveY >= minY && carved < carveBudget && visited < visitBudget) {
-            int dy = carveY - center.getY();
-            int lr = layerRadius(dy);
-            if (lr < 0) { carveY--; carveIndex = 0; continue; }
-            int side = lr * 2 + 1;
-            int total = side * side;
+            int[] lb = shape.layerBounds(carveY);
+            if (lb == null) { carveY--; carveIndex = 0; continue; }
+            int w = lb[1] - lb[0] + 1, d = lb[3] - lb[2] + 1;
+            long total = (long) w * d;
 
             while (carveIndex < total && carved < carveBudget && visited < visitBudget) {
-                int dx = carveIndex % side - lr;
-                int dz = carveIndex / side - lr;
+                int x = lb[0] + (int) (carveIndex % w);
+                int z = lb[2] + (int) (carveIndex / w);
                 visited++;
-                if (!inside(dx, dy, dz)) { carveIndex++; continue; }
-                int x = center.getX() + dx, z = center.getZ() + dz;
-                if (!level.hasChunk(x >> 4, z >> 4)) {
-                    return carved; // чанк ещё грузится (мы его держим) — продолжим в следующем тике
+                if (!inside(x, carveY, z)) { carveIndex++; continue; }
+                LevelChunk chunk = level.getChunkSource().getChunkNow(x >> 4, z >> 4);
+                if (chunk == null) {
+                    if (impactChunks.contains(ChunkPos.asLong(x >> 4, z >> 4))) return carved; // ждём загрузки
+                    carveIndex++;
+                    continue;
                 }
-                BlockPos pos = new BlockPos(x, carveY, z);
+                // Пустые секции (воздух) пропускаем без обращения к блокам
+                int si = chunk.getSectionIndex(carveY);
+                if (si < 0 || si >= chunk.getSectionsCount() || chunk.getSection(si).hasOnlyAir()) { carveIndex++; continue; }
                 carveIndex++;
-                if (carveBlock(level, pos)) carved++;
+                if (carveBlock(level, new BlockPos(x, carveY, z))) carved++;
                 if (positions.size() >= maxBlocks) { finishCarving(level); return carved; }
             }
             if (carveIndex >= total) { carveY--; carveIndex = 0; }
@@ -207,7 +207,14 @@ public final class RestoreJob {
 
     private void finishCarving(ServerLevel level) {
         captureEntities(level); // добираем сущности из чанков, загрузившихся позже
-        // Снимок шёл сверху вниз — разворачиваем, чтобы собирать снизу вверх (сначала опоры)
+        reverseSnapshot();
+        phase = Phase.WAITING;
+        restoreAt = level.getGameTime() + delayTicks;
+        restoreCursor = 0;
+    }
+
+    /** Снимок шёл сверху вниз — разворачиваем, чтобы собирать снизу вверх (сначала опоры). */
+    private void reverseSnapshot() {
         int n = positions.size();
         for (int i = 0, j = n - 1; i < j; i++, j--) {
             long p = positions.getLong(i); positions.set(i, positions.getLong(j)); positions.set(j, p);
@@ -219,17 +226,13 @@ public final class RestoreJob {
             blockEntities.clear();
             blockEntities.putAll(remapped);
         }
-        phase = Phase.WAITING;
-        restoreAt = level.getGameTime() + delayTicks;
-        restoreCursor = 0;
     }
 
     /** Рамки, картины, стойки для брони — иначе отвалятся и выронят предметы. */
     private void captureEntities(ServerLevel level) {
-        AABB box = new AABB(center).inflate(radius + 1, Math.max(depth, height) + 1, radius + 1);
-        for (Entity e : level.getEntities((Entity) null, box, e -> e instanceof HangingEntity || e instanceof ArmorStand)) {
+        for (Entity e : level.getEntities((Entity) null, shape.bounds(), e -> e instanceof HangingEntity || e instanceof ArmorStand)) {
             BlockPos p = e.blockPosition();
-            if (!inside(p.getX() - center.getX(), p.getY() - center.getY(), p.getZ() - center.getZ())) continue;
+            if (!inside(p.getX(), p.getY(), p.getZ())) continue;
             if (!capturedEntities.add(e.getUUID())) continue;
             CompoundTag tag = new CompoundTag();
             if (e.save(tag)) {
@@ -306,11 +309,10 @@ public final class RestoreJob {
 
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
-        tag.putInt("v", 2);
-        tag.putLong("center", center.asLong());
-        tag.putDouble("radius", radius);
-        tag.putDouble("depth", depth);
-        tag.putDouble("height", height);
+        tag.putInt("v", 3);
+        tag.put("shape", shape.save());
+        tag.putInt("minY", minY);
+        tag.putInt("maxY", maxY);
         tag.putInt("maxBlocks", maxBlocks);
         tag.putLong("delay", delayTicks);
         tag.putString("phase", phase.name());
@@ -338,13 +340,18 @@ public final class RestoreJob {
         ents.addAll(entities);
         tag.put("entities", ents);
         tag.put("forced", new LongArrayTag(forcedChunks.toLongArray()));
+        tag.put("impactChunks", new LongArrayTag(impactChunks.toLongArray()));
         return tag;
     }
 
     public static RestoreJob load(CompoundTag tag, HolderLookup.Provider registries) {
-        boolean legacy = tag.getInt("v") < 2; // формат 1.0–1.3: готовый к сборке список, отсортирован снизу вверх
-        RestoreJob job = new RestoreJob(BlockPos.of(tag.getLong("center")),
-                tag.getDouble("radius"), tag.getDouble("depth"), tag.getDouble("height"),
+        int v = tag.getInt("v");
+        // Старые форматы (1.0–1.4): просто собираем то, что уже вырезано
+        boolean legacy = v < 3;
+        RuptureShape shape = legacy
+                ? new RuptureShape(Vec3.atCenterOf(BlockPos.of(tag.getLong("center"))), new Vec3(0, -1, 0), 0, 0f)
+                : RuptureShape.load(tag.getCompound("shape"));
+        RestoreJob job = new RestoreJob(shape, tag.getInt("minY"), tag.getInt("maxY"),
                 legacy ? Integer.MAX_VALUE : tag.getInt("maxBlocks"), tag.getLong("delay"));
         var blockLookup = registries.lookupOrThrow(Registries.BLOCK);
 
@@ -368,12 +375,18 @@ public final class RestoreJob {
         job.restoreAt = tag.getLong("restoreAt");
         job.restoreCursor = tag.getInt("cursor");
         if (legacy) {
-            job.phase = Phase.WAITING;
+            job.phase = v == 2 && "RESTORING".equals(tag.getString("phase")) ? Phase.RESTORING : Phase.WAITING;
+            job.forcedChunks.addElements(0, tag.getLongArray("forced"));
+            if (v == 2 && "CARVING".equals(tag.getString("phase"))) {
+                // кратер 1.4.0 не довырезан: разворачиваем снимок (он шёл сверху вниз) и собираем
+                job.reverseSnapshot();
+            }
         } else {
             job.phase = Phase.valueOf(tag.getString("phase"));
             job.carveY = tag.getInt("carveY");
             job.carveIndex = tag.getInt("carveIndex");
             job.forcedChunks.addElements(0, tag.getLongArray("forced"));
+            job.impactChunks.addAll(LongArrayList.wrap(tag.getLongArray("impactChunks")));
         }
         return job;
     }

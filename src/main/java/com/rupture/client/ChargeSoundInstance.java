@@ -16,8 +16,8 @@ final class ChargeSoundInstance extends AbstractTickableSoundInstance {
         this.player = player;
         this.looping = true;
         this.delay = 0;
-        this.volume = 0.05f;
-        this.pitch = 0.6f;
+        this.volume = 0.7f;
+        this.pitch = 0.5f;
         this.x = player.getX();
         this.y = player.getY();
         this.z = player.getZ();
@@ -33,8 +33,10 @@ final class ChargeSoundInstance extends AbstractTickableSoundInstance {
         this.x = player.getX();
         this.y = player.getY();
         this.z = player.getZ();
-        this.volume = 0.25f + 1.25f * charge;
-        this.pitch = 0.6f + 0.7f * charge;
+        // Громкость >1 в Minecraft не громче, а слышно дальше: с самого начала громко, к 100% — на 64 блока
+        this.volume = 0.7f + 3.3f * charge;
+        // Раскрутка цилиндров: высота от 0.5 до 1.7
+        this.pitch = 0.5f + 1.2f * charge;
     }
 
     @Override

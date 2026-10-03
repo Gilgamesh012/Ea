@@ -196,8 +196,30 @@ public final class ClientFx {
     }
 
     /** Алый вихрь вокруг заряжающего: спирали, затягивание пространства, подъём обломков, осыпание мира. */
+    private static boolean isLocalFirstPerson(Player p) {
+        Minecraft mc = Minecraft.getInstance();
+        return p == mc.player && mc.options.getCameraType().isFirstPerson();
+    }
+
+    /** Точка перед прицелом (в конусе ~18°)? Такие частицы у себя в первом лице не спавним — цель должна быть видна. */
+    private static boolean blocksView(Player p, double x, double y, double z) {
+        Vec3 eye = p.getEyePosition();
+        double vx = x - eye.x, vy = y - eye.y, vz = z - eye.z;
+        double d = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        if (d < 1.0e-3) return true;
+        Vec3 look = p.getViewVector(1f);
+        return (vx * look.x + vy * look.y + vz * look.z) / d > CrackField.VIEW_WINDOW_COS;
+    }
+
+    private static void addChargeParticle(ClientLevel level, Player p, boolean fp, net.minecraft.core.particles.ParticleOptions opt,
+                                          double x, double y, double z, double vx, double vy, double vz) {
+        if (fp && blocksView(p, x, y, z)) return;
+        level.addParticle(opt, x, y, z, vx, vy, vz);
+    }
+
     private static void spawnChargeParticles(ClientLevel level, Player p, float charge) {
         RandomSource rnd = level.random;
+        boolean fp = isLocalFirstPerson(p);
         double density = ClientConfig.particles();
         double cx = p.getX(), cy = p.getY(), cz = p.getZ();
 
@@ -216,7 +238,7 @@ public final class ClientFx {
                 double r = baseR * (0.8 + 0.3 * rnd.nextDouble());
                 double x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
                 double vx = -Math.sin(a) * tangential, vz = Math.cos(a) * tangential;
-                level.addParticle(new DustColorTransitionOptions(rnd.nextFloat() < 0.75f ? SCARLET : CRIMSON, BLOOD, 0.9f + charge * 1.6f),
+                addChargeParticle(level, p, fp, new DustColorTransitionOptions(rnd.nextFloat() < 0.75f ? SCARLET : CRIMSON, BLOOD, 0.9f + charge * 1.6f),
                         x, cy + h, z, vx, 0.0, vz);
             }
         }
@@ -225,7 +247,7 @@ public final class ClientFx {
         int pull = (int) ((1 + charge * 4) * density);
         for (int i = 0; i < pull; i++) {
             double ox = (rnd.nextDouble() - 0.5) * 7, oy = rnd.nextDouble() * 3, oz = (rnd.nextDouble() - 0.5) * 7;
-            level.addParticle(new DustParticleOptions(SCARLET, 0.7f + charge),
+            addChargeParticle(level, p, fp, new DustParticleOptions(SCARLET, 0.7f + charge),
                     cx + ox, cy + oy, cz + oz, -ox * 0.08, (1.0 - oy) * 0.04, -oz * 0.08);
         }
 
@@ -236,7 +258,7 @@ public final class ClientFx {
                 BlockPos ground = BlockPos.containing(cx + Math.cos(a) * r, cy - 0.5, cz + Math.sin(a) * r);
                 BlockState state = level.getBlockState(ground);
                 if (state.isAir()) state = Blocks.BLACKSTONE.defaultBlockState();
-                level.addParticle(new BlockParticleOption(ParticleTypes.BLOCK, state),
+                addChargeParticle(level, p, fp, new BlockParticleOption(ParticleTypes.BLOCK, state),
                         ground.getX() + 0.5, cy + 0.1, ground.getZ() + 0.5, -Math.sin(a) * 0.2, 0.25 + charge * 0.4, Math.cos(a) * 0.2);
             }
         }
@@ -246,15 +268,15 @@ public final class ClientFx {
             int fall = (int) ((charge - 0.7f) * 20 * density);
             for (int i = 0; i < fall; i++) {
                 BlockState dust = rnd.nextBoolean() ? Blocks.REDSTONE_BLOCK.defaultBlockState() : Blocks.BLACKSTONE.defaultBlockState();
-                level.addParticle(new BlockParticleOption(ParticleTypes.FALLING_DUST, dust),
+                addChargeParticle(level, p, fp, new BlockParticleOption(ParticleTypes.FALLING_DUST, dust),
                         cx + (rnd.nextDouble() - 0.5) * 16, cy + 4 + rnd.nextDouble() * 10, cz + (rnd.nextDouble() - 0.5) * 16, 0, 0, 0);
             }
         }
 
         // 5. 100%: искры у клинка
-        if (charge >= 1f && rnd.nextFloat() < 0.6f) {
+        if (charge >= 1f && rnd.nextFloat() < 0.6f && !isLocalFirstPerson(p)) {
             Vec3 tip = p.getEyePosition().add(p.getLookAngle().scale(1.2));
-            level.addParticle(new DustParticleOptions(CRIMSON, 2.0f), tip.x, tip.y - 0.3, tip.z,
+            addChargeParticle(level, p, fp, new DustParticleOptions(CRIMSON, 2.0f), tip.x, tip.y - 0.3, tip.z,
                     rnd.nextGaussian() * 0.05, rnd.nextGaussian() * 0.05, rnd.nextGaussian() * 0.05);
         }
     }
@@ -265,7 +287,8 @@ public final class ClientFx {
     public static void onCameraAngles(ViewportEvent.ComputeCameraAngles event) {
         float partial = (float) event.getPartialTick();
         float ten = Mth.lerp(partial, tensionPrev, tension);
-        float amp = (float) ((Math.pow(ten, 1.4) * 1.6 + impactShake * 6.0) * ClientConfig.shake());
+        boolean fp = Minecraft.getInstance().options.getCameraType().isFirstPerson();
+        float amp = (float) ((Math.pow(ten, 1.4) * (fp ? 0.9 : 1.6) + impactShake * 6.0) * ClientConfig.shake());
         if (amp < 0.001f) return;
         float t = ticks + partial;
         event.setYaw(event.getYaw() + amp * noise(t, 0.3f));
@@ -290,9 +313,10 @@ public final class ClientFx {
     public static void onRenderFog(ViewportEvent.RenderFog event) {
         float k = tension;
         if (k <= 0.02f) return;
-        // Туман сжимается к игроку, небо темнеет до кроваво-красного
-        float far = Mth.lerp(k * 0.8f, event.getFarPlaneDistance(), Math.min(event.getFarPlaneDistance(), 22f));
-        float near = Math.min(event.getNearPlaneDistance(), far * 0.6f * (1f - k));
+        // Небо темнеет до кроваво-красного, но дальность видимости сохраняется — цель должна быть видна
+        float origFar = event.getFarPlaneDistance();
+        float far = Mth.lerp(k * 0.5f, origFar, Math.max(Math.min(origFar, 96f), origFar * 0.55f));
+        float near = Math.min(event.getNearPlaneDistance(), far * (1f - 0.5f * k));
         event.setFarPlaneDistance(far);
         event.setNearPlaneDistance(near);
         event.setCanceled(true);
@@ -311,6 +335,9 @@ public final class ClientFx {
         float partial = event.getPartialTick().getGameTimeDeltaPartialTick(false);
         float time = ticks + partial;
         Matrix4f pose = event.getPoseStack().last().pose();
+        // «Окно прицела»: в первом лице всё, что перед центром экрана, рисуется почти прозрачным
+        org.joml.Vector3f lv = event.getCamera().getLookVector();
+        CrackField.setViewWindow(mc.options.getCameraType().isFirstPerson(), cam, new Vec3(lv.x(), lv.y(), lv.z()));
 
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
         VertexConsumer vc = buffers.getBuffer(RenderType.lightning());
@@ -330,6 +357,7 @@ public final class ClientFx {
             }
         }
         buffers.endBatch(RenderType.lightning());
+        CrackField.setViewWindow(false, cam, Vec3.ZERO);
     }
 
     /**
@@ -403,10 +431,10 @@ public final class ClientFx {
         int w = g.guiWidth(), h = g.guiHeight();
         float ten = tension;
         if (ten > 0.01f) {
-            g.fill(0, 0, w, h, argb(ten * 0.22f, 70, 0, 8));
-            int edge = argb(ten * 0.65f, 90, 0, 10);
-            g.fillGradient(0, 0, w, h / 3, edge, 0x00000000);
-            g.fillGradient(0, h - h / 3, w, h, 0x00000000, edge);
+            // Алая пелена только по краям: центр экрана (прицел) остаётся чистым
+            int edge = argb(ten * 0.7f, 90, 0, 10);
+            g.fillGradient(0, 0, w, h / 4, edge, 0x00000000);
+            g.fillGradient(0, h - h / 4, w, h, 0x00000000, edge);
         }
         if (flash > 0.01f && ClientConfig.flashes()) {
             float f = Math.min(1f, flash);
@@ -441,6 +469,16 @@ public final class ClientFx {
         public static void registerItemRenderer(RegisterClientExtensionsEvent event) {
             event.registerItem(new IClientItemExtensions() {
                 private EaSwordRenderer renderer;
+
+                @Override
+                public net.minecraft.client.model.HumanoidModel.ArmPose getArmPose(net.minecraft.world.entity.LivingEntity entity,
+                        net.minecraft.world.InteractionHand hand, net.minecraft.world.item.ItemStack stack) {
+                    // В третьем лице при зарядке клинок поднят, как копьё перед броском
+                    if (entity.isUsingItem() && entity.getUsedItemHand() == hand) {
+                        return net.minecraft.client.model.HumanoidModel.ArmPose.THROW_SPEAR;
+                    }
+                    return null;
+                }
 
                 @Override
                 public BlockEntityWithoutLevelRenderer getCustomRenderer() {

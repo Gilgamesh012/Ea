@@ -41,7 +41,7 @@ public final class RuptureSavedData extends SavedData {
     void tick(ServerLevel level) {
         if (jobs.isEmpty()) return;
         int carve = RuptureConfig.CARVE_BLOCKS_PER_TICK.get();
-        int visit = carve * 4;
+        int visit = carve * 15; // проверка «внутри вихря» дешёвая, блоки читаются только внутри
         int restore = RuptureConfig.RESTORE_BLOCKS_PER_TICK.get();
 
         Iterator<RestoreJob> it = jobs.iterator();

@@ -169,8 +169,30 @@ final class CrackField {
         }
     }
 
+    /** Косинус половины угла «окна прицела» (~18°). */
+    static final double VIEW_WINDOW_COS = Math.cos(Math.toRadians(18.0));
+    private static boolean windowActive;
+    private static Vec3 windowLook = Vec3.ZERO;
+
+    static void setViewWindow(boolean active, Vec3 cam, Vec3 look) {
+        windowActive = active;
+        windowLook = look;
+    }
+
     /** Отрезок a→b шириной w, развёрнутый к камере. Рисуется с обеих сторон. */
     static void quad(VertexConsumer vc, Matrix4f m, Vec3 cam, Vec3 a, Vec3 b, float w, float r, float g, float bl, float al) {
+        if (windowActive) {
+            double mx = (a.x + b.x) * 0.5 - cam.x, my = (a.y + b.y) * 0.5 - cam.y, mz = (a.z + b.z) * 0.5 - cam.z;
+            double md = Math.sqrt(mx * mx + my * my + mz * mz);
+            if (md > 1.0e-3) {
+                double cos = (mx * windowLook.x + my * windowLook.y + mz * windowLook.z) / md;
+                // плавно: на краю окна полная яркость, в центре — 10%
+                if (cos > VIEW_WINDOW_COS - 0.03) {
+                    double k = Mth.clamp((cos - (VIEW_WINDOW_COS - 0.03)) / 0.06, 0.0, 1.0);
+                    al *= (float) (1.0 - 0.9 * k);
+                }
+            }
+        }
         Vec3 dir = b.subtract(a);
         Vec3 toCam = cam.subtract(a.add(b).scale(0.5));
         Vec3 side = dir.cross(toCam);

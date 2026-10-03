@@ -97,8 +97,8 @@ def crackle(n, rate, lo=2500, hi=9000, grain=0.004, amp_jitter=True):
     return bp(out, lo, hi, 2)
 
 
-def save(name, x):
-    x = norm(x)
+def save(name, x, keep_level=False):
+    x = x if keep_level else norm(x)
     w = os.path.join(OUT, name + ".wav")
     wav.write(w, SR, (x * 32767).astype(np.int16))
     o = os.path.join(OUT, name + ".ogg")
@@ -137,6 +137,65 @@ def charge_loop():
     head = x[:X] * np.linspace(0, 1, X) + x[N:N + X] * np.linspace(1, 0, X)
     loop = np.concatenate([head, x[X:N]])
     return loop
+
+
+# ---------------------------------------------------------------- 1b. зарядка v2: «космическая» раскрутка Эа
+def loudness(x, drive=1.6, peak_db=-0.6):
+    """Плотнее и громче: мягкая компрессия (tanh), затем пик на -0.6 дБ."""
+    x = x / (np.max(np.abs(x)) + 1e-9)
+    x = np.tanh(x * drive) / np.tanh(drive)
+    return x / (np.max(np.abs(x)) + 1e-9) * 10 ** (peak_db / 20)
+
+
+def charge_loop_cosmic():
+    """
+    Артефакт, существовавший до сотворения мира:
+    - суббас 27.5 Гц (ощущается телом) с медленными биениями;
+    - турбинный вой трёх вращающихся цилиндров: гармоники 110 Гц с «флаттером» вращения
+      (в игре высота растёт с зарядом → раскрутка);
+    - неземной хор-гул: кластеры чистых тонов в квинтах/октавах с расстройкой, длинная реверберация;
+    - мерцание звёзд: редкие высокие колокольчики с долгим затуханием;
+    - тихий вихрь пространства на фоне.
+    """
+    L = 4.0
+    gen = 12.0                       # генерируем длиннее и берём середину — хвосты реверба тоже «закольцуются»
+    n = int(gen * SR)
+    t = np.arange(n) / SR
+    # суббас
+    sub = (np.sin(2 * np.pi * 27.5 * t) + 0.6 * np.sin(2 * np.pi * 55.25 * t) + 0.3 * np.sin(2 * np.pi * 82.5 * t))
+    sub = sat(sub * 0.7, 2.0) * (0.85 + 0.15 * np.sin(2 * np.pi * 0.25 * t))
+    # турбина: гармоники 110 Гц, флаттер 3 цилиндров (разные частоты: 6, 7.5, 9 Гц → верх/низ в одну сторону, середина в другую)
+    turb = np.zeros(n)
+    for h, a in [(1, 1.0), (2, 0.7), (3, 0.5), (4, 0.35), (6, 0.25), (8, 0.15), (12, 0.08)]:
+        turb += np.sin(2 * np.pi * 110 * h * t + h * 0.7) * a
+    flutter = (0.55 + 0.15 * np.sin(2 * np.pi * 6.0 * t) + 0.15 * np.sin(2 * np.pi * 7.5 * t + 1.0)
+               + 0.15 * np.sin(2 * np.pi * 9.0 * t + 2.0))
+    turb = lp(turb * flutter, 4000, 2)
+    # хор-гул «космоса»: A-минорный кластер с расстройкой (биения 0.25–0.5 Гц)
+    pad = np.zeros(n)
+    for f, a in [(110, .8), (110.25, .8), (164.8, .55), (165.3, .5), (220, .6), (220.5, .5), (329.6, .35), (330.2, .3),
+                 (440, .25), (659.3, .15), (880.6, .1)]:
+        vib = 1 + 0.002 * np.sin(2 * np.pi * 0.5 * t + f)
+        pad += np.sin(2 * np.pi * np.cumsum(f * vib) / SR) * a
+    pad *= 0.7 + 0.3 * np.sin(2 * np.pi * 0.25 * t)
+    # звёзды
+    stars = np.zeros(n)
+    for _ in range(int(gen * 3)):
+        s0 = rng.integers(0, n - SR)
+        f = rng.choice([1760, 1975.5, 2637, 2960, 3520, 3951, 5274])
+        L2 = int(rng.uniform(0.6, 1.5) * SR)
+        stars[s0:s0 + L2] += np.sin(2 * np.pi * f * np.arange(L2) / SR) * exp_decay(L2, rng.uniform(0.2, 0.6)) * rng.uniform(.2, .6)
+    # вихрь пространства
+    wind = np.zeros(n)
+    for i, (lo, hi) in enumerate([(200, 500), (500, 1200), (1200, 3000)]):
+        wind += bp(noise(n), lo, hi, 2) * (0.5 + 0.5 * np.sin(2 * np.pi * (0.5 + 0.25 * i) * t + i)) ** 2
+    dry = sub * 1.0 + turb * 0.45 + pad * 0.35 + stars * 0.25 + wind * 0.25
+    wet = reverb(dry, 3.5, 0.45, bright=6000)[:n]
+    # середина + бесшовная склейка
+    N = int(L * SR); X = int(0.5 * SR); s0 = int(4.0 * SR)
+    seg = wet[s0:s0 + N + X]
+    loop = np.concatenate([seg[:X] * np.linspace(0, 1, X) + seg[N:N + X] * np.linspace(1, 0, X), seg[X:N]])
+    return loudness(loop, 1.8)
 
 
 # ---------------------------------------------------------------- 2. треск пространства (3 варианта)
@@ -219,7 +278,7 @@ def impact():
 
 if __name__ == "__main__":
     out = {}
-    out["charge_loop"] = save("charge_loop", charge_loop())
+    out["charge_loop"] = save("charge_loop", charge_loop_cosmic(), keep_level=True)
     for i, seed in enumerate((11, 22, 33), 1):
         out[f"crack{i}"] = save(f"crack{i}", crack(seed))
     rng = np.random.default_rng(99)

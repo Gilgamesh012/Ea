@@ -88,7 +88,8 @@ public class SwordOfRuptureItem extends SwordItem {
 
     @Override
     public UseAnim getUseAnimation(ItemStack stack) {
-        return UseAnim.SPEAR;
+        // В первом лице меч остаётся сбоку и не закрывает цель; в третьем лице поза задаётся в ClientFx (поднятый клинок)
+        return UseAnim.NONE;
     }
 
     @Override
