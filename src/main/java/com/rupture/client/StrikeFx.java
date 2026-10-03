@@ -24,8 +24,6 @@ final class StrikeFx {
     /** Сколько тиков вихрь летит до цели. */
     private static final int TRAVEL = 6;
     private static final int LIFE = 55;
-    /** Волны давления живут дольше самого вихря — уходят далеко за горизонт. */
-    private static final int WAVE_LIFE = 130;
 
     private final Vec3 start, end, dir, u, v;
     private final double length;
@@ -113,7 +111,7 @@ final class StrikeFx {
         }
 
         // После удара: вихрь схлопывается в точку
-        if (age > TRAVEL && age < LIFE) {
+        if (age > TRAVEL) {
             float t = (age - TRAVEL) / (float) (LIFE - TRAVEL);
             int n = (int) ((4 + charge * 10) * density);
             double maxR = impactRadius * 1.5;
@@ -125,27 +123,14 @@ final class StrikeFx {
                 level.addParticle(new DustColorTransitionOptions(SCARLET, BLOOD, 1.0f + charge * 1.5f), p.x, p.y, p.z, 0, 0.02, 0);
             }
         }
-        return age < WAVE_LIFE;
+        return age < LIFE;
     }
 
     /** Светящиеся спиральные ленты туннеля и кольца ударной волны. */
     void render(VertexConsumer vc, Matrix4f pose, Vec3 cam, float partial) {
         float t = age + partial;
-        renderPressureWaves(vc, pose, cam, t);
         float env = envelope(t);
         if (env <= 0.01f) return;
-
-        // Ядро гипер-луча: плотный багровый конус по оси вихря (как взгляд с орбиты)
-        double coreFront = length * Math.min(1.0, t / TRAVEL);
-        double step = Math.max(2.0, length / 40.0);
-        for (double d = 0; d < coreFront; d += step) {
-            double d2 = Math.min(coreFront, d + step);
-            Vec3 a = start.add(dir.scale(d)), b = start.add(dir.scale(d2));
-            float w = (float) Math.min(10.0, 0.15 + radiusAt(d2) * 0.28);
-            CrackField.quad(vc, pose, cam, a, b, w * 2.2f, 0.75f, 0.0f, 0.03f, env * 0.25f);
-            CrackField.quad(vc, pose, cam, a, b, w, 1.0f, 0.06f, 0.05f, env * 0.55f);
-            CrackField.quad(vc, pose, cam, a, b, w * 0.3f, 1.0f, 0.55f, 0.45f, env * 0.7f);
-        }
 
         double front = length * Math.min(1.0, t / TRAVEL);
         float spin = t * 0.35f;
@@ -195,32 +180,6 @@ final class StrikeFx {
                 float a = (1f - k) * env;
                 ring(vc, pose, cam, end, new Vec3(1, 0, 0), new Vec3(0, 0, 1), r, 0.25f + charge * 0.3f, a, 1f, 0.05f, 0.04f);
                 ring(vc, pose, cam, end, u, v, r * 0.7, 0.18f + charge * 0.2f, a, 0.75f, 0.0f, 0.03f);
-            }
-        }
-    }
-
-    /** Волны давления по земле: три кольца разбегаются от точки удара далеко за горизонт. */
-    private void renderPressureWaves(VertexConsumer vc, Matrix4f pose, Vec3 cam, float t) {
-        if (t <= TRAVEL || charge < 0.3f) return;
-        float since = t - TRAVEL;
-        double speed = 2.0 + 6.0 * charge;              // блоков за тик
-        for (int k = 0; k < 3; k++) {
-            float tt = since - k * 8f;
-            if (tt <= 0) continue;
-            double r = impactRadius + tt * speed;
-            float alpha = (float) Math.max(0, 1.0 - tt / (WAVE_LIFE - TRAVEL)) * (0.35f + 0.4f * charge);
-            if (alpha < 0.02f) continue;
-            float w = (float) (0.4 + r * 0.01);
-            int seg = 96;
-            Vec3 prev = null;
-            for (int i = 0; i <= seg; i++) {
-                double a = i * (Math.PI * 2 / seg);
-                Vec3 p = end.add(Math.cos(a) * r, 0.3, Math.sin(a) * r);
-                if (prev != null) {
-                    CrackField.quad(vc, pose, cam, prev, p, w * 2.5f, 0.8f, 0.0f, 0.03f, alpha * 0.3f);
-                    CrackField.quad(vc, pose, cam, prev, p, w, 1.0f, 0.12f, 0.08f, alpha);
-                }
-                prev = p;
             }
         }
     }

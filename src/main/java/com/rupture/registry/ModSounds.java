@@ -10,10 +10,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 public final class ModSounds {
     public static final DeferredRegister<SoundEvent> SOUNDS = DeferredRegister.create(Registries.SOUND_EVENT, RuptureMod.MODID);
 
-    /** Механическая раскрутка: тяжёлая турбина/ротор (закольцован, высота растёт с зарядом). */
-    public static final DeferredHolder<SoundEvent, SoundEvent> CHARGE_LOOP = fixed("enuma.charge_loop", 64f);
-    /** Сверхнизкий вибрирующий гул — «закладывает уши». */
-    public static final DeferredHolder<SoundEvent, SoundEvent> SUBHUM = fixed("enuma.subhum", 48f);
+    public static final DeferredHolder<SoundEvent, SoundEvent> CHARGE_LOOP = variable("enuma.charge_loop");
     public static final DeferredHolder<SoundEvent, SoundEvent> CRACK = variable("enuma.crack");
     public static final DeferredHolder<SoundEvent, SoundEvent> FULL_CHARGE = fixed("enuma.full_charge", 96f);
     /** Выстрел и удар слышно далеко — удар может прийти за 370 блоков. */

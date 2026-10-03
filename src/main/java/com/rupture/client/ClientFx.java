@@ -57,7 +57,6 @@ public final class ClientFx {
     private static final Vector3f CRIMSON = new Vector3f(0.9f, 0.04f, 0.06f);
     private static final Vector3f BLOOD = new Vector3f(0.45f, 0.0f, 0.03f);
     private static final Vector3f SCARLET = new Vector3f(1.0f, 0.02f, 0.02f);
-    private static final Vector3f VOID_BLACK = new Vector3f(0.03f, 0.0f, 0.01f);
 
     private static final Map<UUID, CrackField> casterFields = new HashMap<>();
     private static final List<CrackField> fadingFields = new ArrayList<>();
@@ -67,15 +66,6 @@ public final class ClientFx {
     /** Свечение бездны над кратерами: {x, y, z, радиус, глубина, заряд, возраст}. */
     private static final List<float[]> abysses = new ArrayList<>();
     private static final int ABYSS_LIFE = 260;
-    /** Красно-чёрные молнии вокруг клинка: {точки..., возраст}. */
-    private static final List<ArcBolt> arcs = new ArrayList<>();
-    private record ArcBolt(List<Vec3> points, int[] age) {}
-    /** Тики «глушения мелких шумов» в момент залпа. */
-    private static int duckTicks;
-    /** Орбитальный ракурс: сколько тиков осталось и какой вид камеры вернуть. */
-    private static int cinematicTicks;
-    private static final int CINEMATIC_LEN = 60;
-    private static net.minecraft.client.CameraType cinematicRestore;
 
     /** «Напряжение мира» 0..1: от заряда ближайшего заряжающего игрока. Управляет тьмой, туманом, тряской. */
     private static float tension, tensionPrev;
@@ -93,16 +83,7 @@ public final class ClientFx {
         Player me = Minecraft.getInstance().player;
         if (me != null && me.position().distanceTo(p.start()) < 4) {
             impactShake = Math.max(impactShake, 0.25f + p.charge() * 0.35f);
-            // Взгляд с орбиты: на полном заряде камера улетает назад, показывая масштаб
-            if (p.charge() >= 0.999f && ClientConfig.cinematic() && cinematicTicks == 0) {
-                Minecraft mc = Minecraft.getInstance();
-                cinematicRestore = mc.options.getCameraType();
-                mc.options.setCameraType(net.minecraft.client.CameraType.THIRD_PERSON_BACK);
-                cinematicTicks = CINEMATIC_LEN;
-            }
         }
-        // В секунду залпа мелкие шумы глушатся
-        if (me != null && me.position().distanceTo(p.start()) < 64) duckTicks = 50;
     }
 
     /** Вызывается из StrikeFx, когда вихрь достиг цели. */
@@ -135,9 +116,6 @@ public final class ClientFx {
             casterFields.clear();
             casterSpin.clear();
             abysses.clear();
-            arcs.clear();
-            duckTicks = 0;
-            cinematicTicks = 0;
             fadingFields.clear();
             strikes.clear();
             tension = tensionPrev = impactShake = flash = 0f;
@@ -159,9 +137,8 @@ public final class ClientFx {
             UUID id = p.getUUID();
             seen.add(id);
             CrackField field = casterFields.computeIfAbsent(id, u -> {
-                // Новый заряжающий: турбина раскрутки + сверхнизкий гул давления
-                mc.getSoundManager().play(new ChargeSoundInstance(p, ChargeSoundInstance.Layer.TURBINE));
-                mc.getSoundManager().play(new ChargeSoundInstance(p, ChargeSoundInstance.Layer.SUBHUM));
+                // Новый заряжающий: запускаем закольцованный рёв вихря
+                mc.getSoundManager().play(new ChargeSoundInstance(p));
                 return CrackField.aroundCaster(p.position(), u.getLeastSignificantBits() ^ ticks);
             });
             field.charge = charge;
@@ -171,7 +148,6 @@ public final class ClientFx {
             spin[2] = charge;
             spin[3] += 1f;                      // тиков с начала зарядки (золотая рябь Врат Вавилона)
             spawnChargeParticles(level, p, charge);
-            maybeSpawnArc(level, p, charge);
         }
         // Игрок перестал заряжать — его трещины гаснут
         for (Iterator<Map.Entry<UUID, CrackField>> it = casterFields.entrySet().iterator(); it.hasNext(); ) {
@@ -189,44 +165,9 @@ public final class ClientFx {
         impactShake *= 0.9f;
         flash *= 0.84f;
 
-        if (duckTicks > 0) duckTicks--;
-        if (cinematicTicks > 0 && --cinematicTicks == 0 && cinematicRestore != null) {
-            mc.options.setCameraType(cinematicRestore);
-            cinematicRestore = null;
-        }
-        arcs.removeIf(a -> ++a.age()[0] > 4);
         strikes.removeIf(s -> !s.tick(level));
         abysses.removeIf(a -> !tickAbyss(level, a));
         fadingFields.removeIf(f -> !f.tick());
-    }
-
-    /** Сухие щелчки красно-чёрных молний: чем выше заряд, тем чаще. */
-    private static void maybeSpawnArc(ClientLevel level, Player p, float charge) {
-        RandomSource rnd = level.random;
-        if (rnd.nextFloat() > 0.03f + 0.22f * charge) return;
-        Vec3 from = bladePoint(p, 1f);
-        Vec3 dir = new Vec3(rnd.nextGaussian(), rnd.nextGaussian() * 0.6, rnd.nextGaussian()).normalize();
-        double len = 1.5 + rnd.nextDouble() * (1.5 + charge * 3.0);
-        List<Vec3> pts = new ArrayList<>();
-        pts.add(from);
-        int segs = 5 + rnd.nextInt(4);
-        Vec3 cur = from;
-        for (int i = 1; i <= segs; i++) {
-            Vec3 target = from.add(dir.scale(len * i / segs));
-            cur = target.add(new Vec3(rnd.nextGaussian(), rnd.nextGaussian(), rnd.nextGaussian()).scale(0.25));
-            pts.add(cur);
-        }
-        arcs.add(new ArcBolt(pts, new int[]{0}));
-        level.playLocalSound(cur.x, cur.y, cur.z, com.rupture.registry.ModSounds.CRACK.get(),
-                net.minecraft.sounds.SoundSource.PLAYERS, 0.25f + 0.5f * charge, 0.8f + rnd.nextFloat() * 0.5f, false);
-    }
-
-    /** Точка у клинка (перед грудью, чуть справа). */
-    private static Vec3 bladePoint(Player p, float partial) {
-        Vec3 look = p.getViewVector(partial);
-        Vec3 right = new Vec3(-look.z, 0, look.x);
-        if (right.lengthSqr() < 1.0e-4) right = new Vec3(1, 0, 0);
-        return p.getEyePosition(partial).add(look.scale(1.1)).add(right.normalize().scale(0.35)).add(0, -0.25, 0);
     }
 
     /** Тьма и алое свечение поднимаются из глубины кратера (подземный мир сквозь разрыв). */
@@ -322,19 +263,6 @@ public final class ClientFx {
             }
         }
 
-        // 3б. Реальность растрескивается на багровые и чёрные «пиксели»
-        if (charge > 0.2f) {
-            int px = (int) ((1 + charge * 6) * density);
-            double shell = 2.6 + charge * 2.4;
-            for (int i = 0; i < px; i++) {
-                Vec3 d = new Vec3(rnd.nextGaussian(), rnd.nextGaussian(), rnd.nextGaussian()).normalize();
-                double rr = shell * (0.85 + rnd.nextDouble() * 0.3);
-                Vector3f col = rnd.nextBoolean() ? VOID_BLACK : SCARLET;
-                level.addParticle(new DustParticleOptions(col, 0.8f + charge * 1.2f),
-                        cx + d.x * rr, cy + 1.0 + d.y * rr, cz + d.z * rr, 0, 0, 0);
-            }
-        }
-
         // 4. С 70%: мир осыпается — алая и чёрная пыль падает сверху
         if (charge > 0.7f) {
             int fall = (int) ((charge - 0.7f) * 20 * density);
@@ -353,25 +281,6 @@ public final class ClientFx {
         }
     }
 
-    /** В секунду залпа все мелкие шумы глушатся — остаётся только удар Эа. */
-    @SubscribeEvent
-    public static void onPlaySound(net.neoforged.neoforge.client.event.sound.PlaySoundEvent event) {
-        if (duckTicks <= 0) return;
-        var sound = event.getSound();
-        if (sound == null || RuptureMod.MODID.equals(sound.getLocation().getNamespace())) return;
-        if (sound instanceof net.minecraft.client.resources.sounds.TickableSoundInstance) return;
-        event.setSound(new DuckedSound(sound, 0.12f));
-    }
-
-    /** Взгляд с орбиты: камера плавно улетает назад на ~40 блоков и возвращается. */
-    @SubscribeEvent
-    public static void onCameraDistance(net.neoforged.neoforge.client.event.CalculateDetachedCameraDistanceEvent event) {
-        if (cinematicTicks <= 0) return;
-        float t = 1f - cinematicTicks / (float) CINEMATIC_LEN;
-        float k = Mth.sin(t * (float) Math.PI);       // туда и обратно
-        event.setDistance(event.getDistance() + 40f * k * k * (3f - 2f * k));
-    }
-
     // ================================================================ камера, небо, туман
 
     @SubscribeEvent
@@ -388,8 +297,7 @@ public final class ClientFx {
     }
 
     private static float noise(float t, float seed) {
-        // Плавная тряска без высоких частот: иначе мир мелко дрожит, а рука нет — выглядит как рывки
-        return Mth.sin(t * 0.8f + seed) * 0.6f + Mth.sin(t * 1.9f + seed * 2f) * 0.4f;
+        return Mth.sin(t * 1.9f + seed) * 0.5f + Mth.sin(t * 4.7f + seed * 2f) * 0.3f + Mth.sin(t * 9.3f + seed * 3f) * 0.2f;
     }
 
     @SubscribeEvent
@@ -420,7 +328,7 @@ public final class ClientFx {
     public static void onRenderLevel(RenderLevelStageEvent event) {
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
         boolean cracks = ClientConfig.cracks();
-        if (strikes.isEmpty() && casterSpin.isEmpty() && arcs.isEmpty() && (!cracks || fadingFields.isEmpty())) return;
+        if (strikes.isEmpty() && casterSpin.isEmpty() && (!cracks || fadingFields.isEmpty())) return;
 
         Minecraft mc = Minecraft.getInstance();
         Vec3 cam = event.getCamera().getPosition();
@@ -444,17 +352,8 @@ public final class ClientFx {
                 if (spin != null) {
                     Vec3 pos = p.getPosition(partial);
                     renderCasterVortex(vc, pose, cam, pos, Mth.lerp(partial, spin[1], spin[0]), spin[2], time);
-                    GeometryFx.renderGeodesic(vc, pose, cam, pos.add(0, 1.0, 0), spin[2], time);
-                    GeometryFx.renderBladeRings(vc, pose, cam, bladePoint(p, partial), p.getViewVector(partial), spin[2], time);
                     if (spin[3] < 30f) renderGateRipple(vc, pose, cam, p, pos, spin[3] + partial);
                 }
-            }
-        }
-        for (ArcBolt a : arcs) {
-            float al = 1f - a.age()[0] / 5f;
-            for (int i = 0; i < a.points().size() - 1; i++) {
-                CrackField.quad(vc, pose, cam, a.points().get(i), a.points().get(i + 1), 0.09f, 0.8f, 0.0f, 0.02f, 0.5f * al);
-                CrackField.quad(vc, pose, cam, a.points().get(i), a.points().get(i + 1), 0.02f, 1.0f, 0.55f, 0.5f, al);
             }
         }
         buffers.endBatch(RenderType.lightning());
@@ -570,26 +469,6 @@ public final class ClientFx {
         public static void registerItemRenderer(RegisterClientExtensionsEvent event) {
             event.registerItem(new IClientItemExtensions() {
                 private EaSwordRenderer renderer;
-
-                /**
-                 * Та же поза, что в третьем лице (там «бросок копья» — клинок поднят над головой):
-                 * Эа плавно поднимается вверх-вправо, остриём к небу. Никакой дрожи — только плавная интерполяция.
-                 * Вне зарядки — ванильная анимация (обычный взмах).
-                 */
-                @Override
-                public boolean applyForgeHandTransform(com.mojang.blaze3d.vertex.PoseStack ps, net.minecraft.client.player.LocalPlayer player,
-                        net.minecraft.world.entity.HumanoidArm arm, net.minecraft.world.item.ItemStack stack,
-                        float partialTick, float equipProcess, float swingProcess) {
-                    if (!player.isUsingItem() || player.getUseItem() != stack) return false;
-                    float k = Mth.clamp((player.getTicksUsingItem() + partialTick) / 7f, 0f, 1f);
-                    k = k * k * (3f - 2f * k);
-                    int side = arm == net.minecraft.world.entity.HumanoidArm.RIGHT ? 1 : -1;
-                    ps.translate(side * 0.56f, -0.52f, -0.72f);                 // ванильная точка удержания (без equip-рывка)
-                    ps.translate(side * 0.10f * k, 0.42f * k, 0.05f * k);       // вверх: клинок над головой
-                    ps.mulPose(com.mojang.math.Axis.XP.rotationDegrees(12f * k)); // остриё к небу, чуть назад
-                    ps.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(side * -14f * k));
-                    return true;
-                }
 
                 @Override
                 public BlockEntityWithoutLevelRenderer getCustomRenderer() {

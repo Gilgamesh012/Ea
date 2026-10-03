@@ -86,15 +86,6 @@ public class SwordOfRuptureItem extends SwordItem {
         return 72000;
     }
 
-    /**
-     * NeoForge по умолчанию «перевзводит» предмет в руке при любой пересылке стака с сервера — рука дёргается вниз.
-     * Перевзводим только при смене слота или самого предмета.
-     */
-    @Override
-    public boolean shouldCauseReequipAnimation(ItemStack oldStack, ItemStack newStack, boolean slotChanged) {
-        return slotChanged || !ItemStack.isSameItem(oldStack, newStack);
-    }
-
     @Override
     public UseAnim getUseAnimation(ItemStack stack) {
         return UseAnim.SPEAR;

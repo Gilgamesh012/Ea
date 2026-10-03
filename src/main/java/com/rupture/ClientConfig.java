@@ -21,10 +21,6 @@ public final class ClientConfig {
             .comment("Множитель количества частиц вихря")
             .defineInRange("particleDensity", 1.0, 0.1, 3.0);
 
-    public static final ModConfigSpec.BooleanValue CINEMATIC = B
-            .comment("Орбитальный ракурс: на 100% заряда камера на 3 секунды улетает назад, показывая масштаб удара")
-            .define("cinematicCamera", true);
-
     public static final ModConfigSpec SPEC = B.build();
 
     private ClientConfig() {}
@@ -33,7 +29,6 @@ public final class ClientConfig {
     public static boolean flashes() { try { return FLASHES.get(); } catch (IllegalStateException e) { return true; } }
     public static boolean cracks() { try { return CRACKS.get(); } catch (IllegalStateException e) { return true; } }
     public static double particles() { return safe(PARTICLES, 1.0); }
-    public static boolean cinematic() { try { return CINEMATIC.get(); } catch (IllegalStateException e) { return true; } }
 
     private static double safe(ModConfigSpec.DoubleValue v, double def) {
         try { return v.get(); } catch (IllegalStateException e) { return def; }
