@@ -1,18 +1,16 @@
 package com.rupture.strike;
 
 import com.rupture.RuptureConfig;
+import com.rupture.network.StrikeFxPayload;
 import com.rupture.registry.ModTags;
 import com.rupture.restore.RestoreJob;
 import com.rupture.restore.RuptureSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.core.particles.DustParticleOptions;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.entity.LivingEntity;
@@ -22,7 +20,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Vector3f;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.LinkedHashSet;
 import java.util.Optional;
@@ -33,8 +31,6 @@ import java.util.Set;
  * Вызывается только на сервере.
  */
 public final class RuptureStrike {
-    private static final Vector3f CRIMSON = new Vector3f(0.9f, 0.05f, 0.1f);
-
     private RuptureStrike() {}
 
     public static void fire(ServerLevel level, Player player, float charge) {
@@ -54,7 +50,8 @@ public final class RuptureStrike {
         boolean trueDamage = charge >= RuptureConfig.TRUE_DAMAGE_THRESHOLD.get();
         DamageSource source = damageSource(level, player, trueDamage);
 
-        double impactRadius = Mth.lerp(charge, RuptureConfig.IMPACT_RADIUS_MIN.get(), RuptureConfig.IMPACT_RADIUS_MAX.get());
+        // Радиус урона растёт пропорционально заряду
+        double impactRadius = Math.max(1.5, RuptureConfig.IMPACT_RADIUS_MAX.get() * charge);
         double cosHalfAngle = Math.cos(Math.toRadians(RuptureConfig.CONE_HALF_ANGLE.get()));
 
         Set<LivingEntity> targets = new LinkedHashSet<>();
@@ -81,12 +78,11 @@ public final class RuptureStrike {
 
         // 3. Блоки: снимок + исчезновение
         if (RuptureConfig.DESTROY_BLOCKS.get() && charge >= RuptureConfig.BLOCK_MIN_CHARGE.get()) {
-            double minC = RuptureConfig.BLOCK_MIN_CHARGE.get();
-            double t = minC >= 1.0 ? 1.0 : (charge - minC) / (1.0 - minC);
-            double blockRadius = Mth.lerp(t, RuptureConfig.BLOCK_RADIUS_MIN.get(), RuptureConfig.BLOCK_RADIUS_MAX.get());
+            // Радиус разрыва растёт пропорционально заряду
+            double blockRadius = RuptureConfig.BLOCK_RADIUS_MAX.get() * charge;
             BlockPos center = BlockPos.containing(impact);
 
-            if (level.mayInteract(player, center)) { // уважаем защиту спавна
+            if (blockRadius >= 1.0 && level.mayInteract(player, center)) { // уважаем защиту спавна
                 long restoreAt = level.getGameTime() + RuptureConfig.RESTORE_DELAY_SECONDS.get() * 20L;
                 RestoreJob job = RestoreJob.carve(level, center, blockRadius, RuptureConfig.MAX_BLOCKS_PER_STRIKE.get(), restoreAt);
                 if (!job.isEmpty()) {
@@ -95,9 +91,12 @@ public final class RuptureStrike {
             }
         }
 
-        // 4. Базовый визуал (полноценные трещины/тряска — следующий этап)
-        spawnBeamParticles(level, eye, look, beamLength, charge);
-        spawnImpactEffects(level, impact, charge);
+        // 4. Визуал рисуют клиенты (алый вихрь, вспышка, тряска), звук — сервер
+        Vec3 beamStart = eye.add(look.scale(0.8)).subtract(0, 0.25, 0);
+        Vec3 mid = beamStart.add(impact).scale(0.5);
+        PacketDistributor.sendToPlayersNear(level, null, mid.x, mid.y, mid.z, 160.0 + beamLength,
+                new StrikeFxPayload(beamStart, impact, charge, (float) impactRadius));
+        playStrikeSounds(level, eye, impact, charge);
     }
 
     private static boolean isValidTarget(LivingEntity e, Player owner) {
@@ -129,31 +128,18 @@ public final class RuptureStrike {
         return new DamageSource(type, player);
     }
 
-    private static void spawnBeamParticles(ServerLevel level, Vec3 eye, Vec3 look, double length, float charge) {
-        double tan = Math.tan(Math.toRadians(RuptureConfig.CONE_HALF_ANGLE.get()));
-        DustParticleOptions dust = new DustParticleOptions(CRIMSON, 1.0f + charge * 2f);
-        Vec3 start = eye.add(look.scale(1.0)).subtract(0, 0.2, 0);
-        for (double d = 0; d < length; d += 0.5) {
-            Vec3 p = start.add(look.scale(d));
-            double spread = d * tan * 0.5; // конус расширяется к цели
-            level.sendParticles(dust, p.x, p.y, p.z, 2 + (int) (charge * 4), spread, spread, spread, 0);
-            if (d % 2 == 0) {
-                level.sendParticles(ParticleTypes.REVERSE_PORTAL, p.x, p.y, p.z, 2, spread, spread, spread, 0.02);
-            }
+    private static void playStrikeSounds(ServerLevel level, Vec3 from, Vec3 at, float charge) {
+        float vol = 1.5f + charge * 4f;
+        level.playSound(null, from.x, from.y, from.z, SoundEvents.WARDEN_SONIC_BOOM, SoundSource.PLAYERS, vol, 1.3f - charge * 0.7f);
+        level.playSound(null, from.x, from.y, from.z, SoundEvents.BEACON_DEACTIVATE, SoundSource.PLAYERS, vol, 0.5f);
+        level.playSound(null, at.x, at.y, at.z, SoundEvents.END_PORTAL_SPAWN, SoundSource.PLAYERS, vol, 1.6f - charge);
+        level.playSound(null, at.x, at.y, at.z, SoundEvents.GLASS_BREAK, SoundSource.PLAYERS, vol, 0.5f);
+        if (charge >= 0.4f) {
+            level.playSound(null, at.x, at.y, at.z, SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, vol * 2f, 0.6f);
+            level.playSound(null, at.x, at.y, at.z, SoundEvents.WITHER_BREAK_BLOCK, SoundSource.PLAYERS, vol, 0.5f);
         }
-        level.playSound(null, eye.x, eye.y, eye.z, SoundEvents.WARDEN_SONIC_BOOM, SoundSource.PLAYERS,
-                2.0f + charge * 2f, 1.4f - charge * 0.8f);
-    }
-
-    private static void spawnImpactEffects(ServerLevel level, Vec3 at, float charge) {
-        // «Моргание» мира на любом заряде
-        level.sendParticles(ParticleTypes.FLASH, at.x, at.y, at.z, 1, 0, 0, 0, 0);
-        if (charge >= 0.5f) {
-            level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, at.x, at.y, at.z, 1 + (int) (charge * 3), 1.5, 1.5, 1.5, 0);
-        } else {
-            level.sendParticles(ParticleTypes.EXPLOSION, at.x, at.y, at.z, 3, 0.5, 0.5, 0.5, 0);
+        if (charge >= 0.8f) {
+            level.playSound(null, at.x, at.y, at.z, SoundEvents.ENDER_DRAGON_GROWL, SoundSource.PLAYERS, vol * 2f, 0.5f);
         }
-        level.playSound(null, at.x, at.y, at.z, SoundEvents.END_PORTAL_SPAWN, SoundSource.PLAYERS,
-                1.0f + charge * 3f, 1.6f - charge);
     }
 }
