@@ -7,17 +7,26 @@ import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.player.Player;
 
-/** Закольцованный рёв вихря, следует за заряжающим игроком; громкость и высота растут с зарядом. */
+/**
+ * Закольцованный слой звука зарядки, следует за игроком:
+ * TURBINE — механическая раскрутка (громкость и высота растут с зарядом),
+ * SUBHUM — сверхнизкий гул давления, нарастает к полному заряду.
+ */
 final class ChargeSoundInstance extends AbstractTickableSoundInstance {
-    private final Player player;
+    enum Layer { TURBINE, SUBHUM }
 
-    ChargeSoundInstance(Player player) {
-        super(ModSounds.CHARGE_LOOP.get(), SoundSource.PLAYERS, SoundInstance.createUnseededRandom());
+    private final Player player;
+    private final Layer layer;
+
+    ChargeSoundInstance(Player player, Layer layer) {
+        super(layer == Layer.TURBINE ? ModSounds.CHARGE_LOOP.get() : ModSounds.SUBHUM.get(),
+                SoundSource.PLAYERS, SoundInstance.createUnseededRandom());
         this.player = player;
+        this.layer = layer;
         this.looping = true;
         this.delay = 0;
-        this.volume = 0.05f;
-        this.pitch = 0.6f;
+        this.volume = layer == Layer.TURBINE ? 0.35f : 0.0001f;
+        this.pitch = layer == Layer.TURBINE ? 0.6f : 0.8f;
         this.x = player.getX();
         this.y = player.getY();
         this.z = player.getZ();
@@ -29,12 +38,17 @@ final class ChargeSoundInstance extends AbstractTickableSoundInstance {
             stop();
             return;
         }
-        float charge = SwordOfRuptureItem.chargeFromTicks(player.getTicksUsingItem());
+        float c = SwordOfRuptureItem.chargeFromTicks(player.getTicksUsingItem());
         this.x = player.getX();
         this.y = player.getY();
         this.z = player.getZ();
-        this.volume = 0.25f + 1.25f * charge;
-        this.pitch = 0.6f + 0.7f * charge;
+        if (layer == Layer.TURBINE) {
+            this.volume = 0.35f + 0.65f * c;
+            this.pitch = 0.6f + 0.75f * c;      // раскрутка ротора
+        } else {
+            this.volume = Math.max(0.0001f, (float) Math.pow(c, 1.5));
+            this.pitch = 0.8f + 0.4f * c;
+        }
     }
 
     @Override

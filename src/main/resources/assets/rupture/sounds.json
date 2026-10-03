@@ -1,22 +1,50 @@
 {
   "enuma.charge_loop": {
     "subtitle": "subtitles.rupture.enuma.charge",
-    "sounds": [{ "name": "rupture:enuma/charge_loop" }]
+    "sounds": [
+      {
+        "name": "rupture:enuma/charge_loop"
+      }
+    ]
   },
   "enuma.crack": {
     "subtitle": "subtitles.rupture.enuma.crack",
-    "sounds": ["rupture:enuma/crack1", "rupture:enuma/crack2", "rupture:enuma/crack3"]
+    "sounds": [
+      "rupture:enuma/crack1",
+      "rupture:enuma/crack2",
+      "rupture:enuma/crack3"
+    ]
   },
   "enuma.full_charge": {
     "subtitle": "subtitles.rupture.enuma.full_charge",
-    "sounds": [{ "name": "rupture:enuma/full_charge" }]
+    "sounds": [
+      {
+        "name": "rupture:enuma/full_charge"
+      }
+    ]
   },
   "enuma.release": {
     "subtitle": "subtitles.rupture.enuma.release",
-    "sounds": [{ "name": "rupture:enuma/release" }]
+    "sounds": [
+      {
+        "name": "rupture:enuma/release"
+      }
+    ]
   },
   "enuma.impact": {
     "subtitle": "subtitles.rupture.enuma.impact",
-    "sounds": [{ "name": "rupture:enuma/impact" }]
+    "sounds": [
+      {
+        "name": "rupture:enuma/impact"
+      }
+    ]
+  },
+  "enuma.subhum": {
+    "subtitle": "subtitles.rupture.enuma.subhum",
+    "sounds": [
+      {
+        "name": "rupture:enuma/subhum_loop"
+      }
+    ]
   }
 }

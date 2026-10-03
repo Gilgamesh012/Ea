@@ -7,9 +7,10 @@
   "death.attack.rupture.item": "%1$s был стёрт из пространства игроком %2$s с помощью %3$s",
   "death.attack.rupture.player": "%1$s был стёрт из пространства, спасаясь от %2$s",
   "itemGroup.rupture": "Сокровищница Вавилона",
-  "subtitles.rupture.enuma.charge": "Ревёт алый вихрь",
-  "subtitles.rupture.enuma.crack": "Трескается пространство",
+  "subtitles.rupture.enuma.charge": "Раскручивается турбина Эа",
+  "subtitles.rupture.enuma.crack": "Щёлкают красно-чёрные молнии",
   "subtitles.rupture.enuma.full_charge": "Эа полностью заряжен",
   "subtitles.rupture.enuma.release": "Энума Элиш!",
-  "subtitles.rupture.enuma.impact": "Мир разрывается"
+  "subtitles.rupture.enuma.impact": "Мир разрывается",
+  "subtitles.rupture.enuma.subhum": "Закладывает уши — гудит суббас"
 }
