@@ -1,0 +1,9 @@
+{
+  "item.rupture.sword_of_rupture": "Меч Разрыва — Эа",
+  "item.rupture.sword_of_rupture.desc": "Клинок, что разделил небо и землю",
+  "item.rupture.sword_of_rupture.ability": "Удерживайте ПКМ: «Энума Элиш»",
+  "message.rupture.charge": "Энума Элиш: %s%%",
+  "death.attack.rupture": "%1$s был стёрт из пространства игроком %2$s",
+  "death.attack.rupture.item": "%1$s был стёрт из пространства игроком %2$s с помощью %3$s",
+  "death.attack.rupture.player": "%1$s был стёрт из пространства, спасаясь от %2$s"
+}
