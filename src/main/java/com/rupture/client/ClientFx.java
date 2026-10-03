@@ -160,6 +160,7 @@ public final class ClientFx {
             }
         }
 
+        tickLevitation(mc, me);
         tensionPrev = tension;
         tension += (target - tension) * 0.12f;
         impactShake *= 0.9f;
@@ -168,6 +169,30 @@ public final class ClientFx {
         strikes.removeIf(s -> !s.tick(level));
         abysses.removeIf(a -> !tickAbyss(level, a));
         fadingFields.removeIf(f -> !f.tick());
+    }
+
+    /** Высота, с которой начали заряжать: выше неё + LEVITATE_MAX подняться нельзя. */
+    private static double levitateBaseY = Double.NaN;
+    private static final double LEVITATE_MAX = 6.0;
+
+    /**
+     * Лёгкая левитация во время зарядки: зажат прыжок — плавно поднимаешься (~2.4 блока/с, медленнее творческого полёта),
+     * отпустил — медленно парешь вниз. Не выше 6 блоков над точкой начала зарядки.
+     */
+    private static void tickLevitation(Minecraft mc, Player me) {
+        boolean charging = me.isUsingItem() && me.getUseItem().getItem() instanceof SwordOfRuptureItem;
+        if (!charging || me.getAbilities().flying) {
+            levitateBaseY = Double.NaN;
+            return;
+        }
+        if (Double.isNaN(levitateBaseY)) levitateBaseY = me.getY();
+        Vec3 v = me.getDeltaMovement();
+        if (mc.options.keyJump.isDown() && me.getY() < levitateBaseY + LEVITATE_MAX) {
+            me.setDeltaMovement(v.x, Math.max(v.y, 0.12), v.z);
+        } else if (!me.onGround()) {
+            me.setDeltaMovement(v.x, Math.max(v.y, -0.06), v.z);   // мягкое парение вниз
+        }
+        me.resetFallDistance();
     }
 
     /** Тьма и алое свечение поднимаются из глубины кратера (подземный мир сквозь разрыв). */
@@ -352,7 +377,6 @@ public final class ClientFx {
                 if (spin != null) {
                     Vec3 pos = p.getPosition(partial);
                     renderCasterVortex(vc, pose, cam, pos, Mth.lerp(partial, spin[1], spin[0]), spin[2], time);
-                    if (spin[3] < 30f) renderGateRipple(vc, pose, cam, p, pos, spin[3] + partial);
                 }
             }
         }
@@ -468,6 +492,14 @@ public final class ClientFx {
         @SubscribeEvent
         public static void registerItemRenderer(RegisterClientExtensionsEvent event) {
             event.registerItem(new IClientItemExtensions() {
+                @Override
+                public net.minecraft.client.model.HumanoidModel.ArmPose getArmPose(net.minecraft.world.entity.LivingEntity entity,
+                        net.minecraft.world.InteractionHand hand, net.minecraft.world.item.ItemStack stack) {
+                    // В третьем лице при зарядке Эа поднят строго вертикально (RuptureArmPoses)
+                    if (entity.isUsingItem() && entity.getUsedItemHand() == hand) return RuptureArmPoses.RAISE_EA.getValue();
+                    return null;
+                }
+
                 private EaSwordRenderer renderer;
 
                 @Override

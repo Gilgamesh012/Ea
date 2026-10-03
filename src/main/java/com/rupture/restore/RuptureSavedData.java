@@ -47,8 +47,10 @@ public final class RuptureSavedData extends SavedData {
         Iterator<RestoreJob> it = jobs.iterator();
         while (it.hasNext()) {
             RestoreJob job = it.next();
+            if (level.getGameTime() % 5 == 0) job.holdLooseEntities(level);
             job.tick(level, carve, visit, restore);
             if (job.isDone()) {
+                job.releaseLooseEntities(level);
                 job.releaseChunks(level);
                 var c = job.center();
                 level.playSound(null, c.getX() + 0.5, c.getY() + 0.5, c.getZ() + 0.5,

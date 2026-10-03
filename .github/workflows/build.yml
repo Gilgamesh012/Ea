@@ -20,10 +20,17 @@ jobs:
         with:
           name: sword-of-rupture-jar
           path: build/libs/*.jar
-      - name: Publish jar to the "latest" release
+      - name: Publish jar (latest + versioned backup)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest --yes --cleanup-tag || true
           VER=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+          gh release delete latest --yes --cleanup-tag || true
           gh release create latest build/libs/*.jar --title "v$VER (${GITHUB_SHA::7})" --notes "Автосборка из коммита ${GITHUB_SHA::7}" --latest
+          # Бэкап версии: свой тег и релиз v$VER (пересоздаётся при новых сборках той же версии)
+          gh release delete "v$VER" --yes --cleanup-tag || true
+          NOTES=$(awk "/^## $VER/{f=1;next} /^## /{f=0} f" CHANGELOG.md)
+          gh release create "v$VER" build/libs/*.jar --target "$GITHUB_SHA" --title "v$VER" --notes "${NOTES:-Версия $VER}" --latest=false
+          # Храним бинарники текущей и двух предыдущих версий; теги (исходники) не удаляем
+          gh release list --limit 100 --json tagName,createdAt -q '[.[] | select(.tagName|startswith("v"))] | sort_by(.createdAt) | reverse | .[3:] | .[].tagName' \
+            | while read -r t; do gh release delete "$t" --yes || true; done

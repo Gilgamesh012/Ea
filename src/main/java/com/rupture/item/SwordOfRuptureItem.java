@@ -108,11 +108,8 @@ public class SwordOfRuptureItem extends SwordItem {
         }
 
         // Рёв вихря (закольцованный) играет на клиенте и следует за игроком — см. ChargeSoundInstance.
-        // Каждые 10% пространство трескается
-        int step = Math.max(1, full / 10);
-        if (charge < 1f && used > 0 && used % step == 0) {
-            level.playSound(null, x, y, z, ModSounds.CRACK.get(), SoundSource.PLAYERS, 0.6f + charge * 1.6f, 1.1f - charge * 0.35f);
-        }
+        // Сервер: без урона от падения во время левитации (подъём/парение считает клиент — см. ClientFx.tickLevitation)
+        entity.resetFallDistance();
         // Полный заряд: суббас-удар и белая вспышка
         if (used == full) {
             level.playSound(null, x, y, z, ModSounds.FULL_CHARGE.get(), SoundSource.PLAYERS, 3.0f, 1.0f);

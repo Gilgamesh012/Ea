@@ -1,0 +1,13 @@
+{
+  "entries": [
+    {
+      "enum": "net/minecraft/client/model/HumanoidModel$ArmPose",
+      "name": "RUPTURE_RAISE_EA",
+      "constructor": "(ZLnet/neoforged/neoforge/client/IArmPoseTransformer;)V",
+      "parameters": {
+        "class": "com/rupture/client/RuptureArmPoses",
+        "field": "RAISE_EA"
+      }
+    }
+  ]
+}

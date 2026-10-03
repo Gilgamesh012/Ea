@@ -4,6 +4,9 @@ import com.rupture.RuptureMod;
 import com.rupture.RuptureShape;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 import com.rupture.registry.ModTags;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
@@ -238,6 +241,37 @@ public final class RestoreJob {
             if (e.save(tag)) {
                 entities.add(tag);
                 e.discard();
+            }
+        }
+    }
+
+    // ================================================================== «иллюзия»: ничего не проваливается
+
+    private static final String HELD_TAG = "rupture_held";
+
+    /** Предметы и опыт над/в разрыве зависают на месте, пока мир не соберётся. */
+    void holdLooseEntities(ServerLevel level) {
+        for (Entity e : level.getEntities((Entity) null, shape.bounds(), e -> e instanceof ItemEntity || e instanceof ExperienceOrb)) {
+            BlockPos p = e.blockPosition();
+            if (!inside(p.getX(), p.getY(), p.getZ()) && !inside(p.getX(), p.getY() - 1, p.getZ())) continue;
+            if (!e.isNoGravity()) {
+                e.setNoGravity(true);
+                e.getPersistentData().putBoolean(HELD_TAG, true);
+            }
+            e.setDeltaMovement(Vec3.ZERO);
+        }
+    }
+
+    /** Мир собран: отпускаем зависшее; всё, что оказалось внутри блоков (предметы, мобы, игроки), — на поверхность. */
+    void releaseLooseEntities(ServerLevel level) {
+        for (Entity e : level.getEntities((Entity) null, shape.bounds().inflate(2), e -> true)) {
+            if (e.getPersistentData().getBoolean(HELD_TAG)) {
+                e.setNoGravity(false);
+                e.getPersistentData().remove(HELD_TAG);
+            }
+            if (!level.noCollision(e, e.getBoundingBox().deflate(0.05))) {
+                int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, e.getBlockX(), e.getBlockZ());
+                if (top > e.getY()) e.teleportTo(e.getX(), top + 0.05, e.getZ());
             }
         }
     }
