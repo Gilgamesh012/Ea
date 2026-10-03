@@ -1,6 +1,7 @@
 package com.rupture.restore;
 
 import com.rupture.RuptureConfig;
+import com.rupture.registry.ModSounds;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -51,8 +52,9 @@ public final class RuptureSavedData extends SavedData {
             if (job.isDone()) {
                 job.releaseChunks(level);
                 var c = job.center();
+                // мир собрался — пространство схлопывается обратно
                 level.playSound(null, c.getX() + 0.5, c.getY() + 0.5, c.getZ() + 0.5,
-                        SoundEvents.RESPAWN_ANCHOR_SET_SPAWN, SoundSource.BLOCKS, 4.0f, 0.6f);
+                        ModSounds.COLLAPSE.get(), SoundSource.BLOCKS, 1.0f, 0.8f);
                 it.remove();
             }
         }
